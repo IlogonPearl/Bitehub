@@ -1,0 +1,6 @@
+# Ignore secrets
+.streamlit/secrets.toml
+__pycache__/
+*.pyc
+receipts.csv
+feedback.csv

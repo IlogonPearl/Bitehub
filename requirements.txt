@@ -4,3 +4,4 @@ matplotlib
 qrcode[pil]
 groq
 pillow
+snowflake-connector-python

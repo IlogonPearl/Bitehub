@@ -124,6 +124,24 @@ if st.session_state.page == "login":
     email = st.text_input("Email", placeholder="Enter your email")
     password = st.text_input("Password", type="password", placeholder="Enter your password")
 
+#CSS styling
+st.markdown("""
+<style>
+            div.stButton > button {
+                display: inline-block;
+                margin: 10px;         /* space between buttons */
+                width: 180px;
+                height: 50px;
+                font-size: 18px;
+                border-radius: 8px;
+            }
+            .center-buttons {
+                text-align: center;
+            }
+            </style>
+            """, unsafe_allow_html=True)
+st.markdown('<div class="center-buttons">', unsafe_allow_html=True)
+
     col1, col2, col3 = st.columns(3)
 
     with col1:
@@ -307,4 +325,5 @@ elif st.session_state.page == "main":
         st.pyplot(fig)
     else:
         st.info("No sales records available yet.")
+
 

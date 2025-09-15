@@ -162,7 +162,7 @@ elif st.session_state.page == "signup":
 # MAIN APP
 # =========================================================
 elif st.session_state.page == "main":
-    st.title(f"🏫 Welcome {st.session_state.user} to Canteen GenAI System")
+    st.title(f"🏫 Welcome {st.session_state.user} to BiteHub")
 
     # 🔓 Encouragement banner for guest
     if st.session_state.user == "Guest":
@@ -307,3 +307,4 @@ elif st.session_state.page == "main":
         st.pyplot(fig)
     else:
         st.info("No sales records available yet.")
+

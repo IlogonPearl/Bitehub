@@ -108,39 +108,102 @@ menu_data = {
 client = Groq(api_key=st.secrets["GROQ_API_KEY"])
 
 # =========================================================
-# LOGIN & SIGNUP SYSTEM
-# =========================================================
+
+# ====================================
+# CSS for styling
+# ====================================
 st.markdown("""
     <style>
-    .login-card {
-        background-color: white;
-        padding: 40px;
-        border-radius: 10px;
-        box-shadow: 0px 4px 8px rgba(0,0,0,0.2);
-        width: 350px;
-        margin: auto;
-        text-align: center;
+    div.stButton > button {
+        display: inline-block;
+        margin: 10px;         /* space between buttons */
+        width: 180px;
+        height: 50px;
+        font-size: 18px;
+        border-radius: 8px;
     }
-    .login-title {
-        font-size: 24px;
-        font-weight: bold;
-        margin-bottom: 20px;
+    .center-buttons {
+        text-align: center;
     }
     </style>
 """, unsafe_allow_html=True)
 
+# =========================================================
+# LOGIN & SIGNUP SYSTEM
+# =========================================================
 if "page" not in st.session_state:
     st.session_state.page = "login"
 
-# SIGN UP
-if st.session_state.page == "signup":
-    st.markdown("<div class='login-card'>", unsafe_allow_html=True)
-    st.markdown("<div class='login-title'>Sign up</div>", unsafe_allow_html=True)
+# =========================
+# =========================
+import streamlit as st
 
-    new_email = st.text_input("Email", key="signup_email")
-    new_pass = st.text_input("Password", type="password", key="signup_pass")
-    if st.button("Create Account"):
-        st.success("✅ Account created! Please log in.")
+st.set_page_config(page_title="Cafe Login", layout="centered")
+
+# ====================================
+# Login form UI
+# ====================================
+st.markdown("<div class='login-card'>", unsafe_allow_html=True)
+st.markdown("<h2>☕ Welcome Back</h2>", unsafe_allow_html=True)
+
+
+
+email = st.text_input("Email", placeholder="Enter your email")
+password = st.text_input("Password", type="password", placeholder="Enter your password")
+#CSS styling
+st.markdown("""
+<style>
+            div.stButton > button {
+                display: inline-block;
+                margin: 10px;         /* space between buttons */
+                width: 180px;
+                height: 50px;
+                font-size: 18px;
+                border-radius: 8px;
+            }
+            .center-buttons {
+                text-align: center;
+            }
+            </style>
+            """, unsafe_allow_html=True)
+st.markdown('<div class="center-buttons">', unsafe_allow_html=True)
+
+
+col1, col2, col3 = st.columns(3)
+
+# --- Button 1: Log In ---
+with col1:
+    if st.button("Log In", key="login_btn"):
+        if email and password:
+            st.session_state.page = "main"
+            st.session_state.user = email
+            st.success(f"✅ Logged in as {email}")
+        else:
+            st.error("⚠️ Please enter both email and password.")
+
+# --- Button 2: Guest Account ---
+with col2:
+    if st.button("Guest Account", key="guest_btn"):
+        st.session_state.page = "main"
+        st.session_state.user = "Guest"
+        st.info("Logged in as Guest")
+
+# --- Button 3: Create Account ---
+with col3:
+    if st.button("Create Account", key="create_btn"):
+        st.session_state.page = "signup"
+# ====================================
+# Signup Page
+# ====================================
+if "page" in st.session_state and st.session_state.page == "signup":
+    st.markdown("<div class='login-card'>", unsafe_allow_html=True)
+    st.markdown("<h2>✍️ Create Account</h2>", unsafe_allow_html=True)
+
+    new_email = st.text_input("New Email", key="new_email")
+    new_pass = st.text_input("New Password", type="password", key="new_pass")
+
+    if st.button("Register"):
+        st.success("✅ Account created! You can now log in.")
         st.session_state.page = "login"
 
     if st.button("Back to Login"):
@@ -148,36 +211,7 @@ if st.session_state.page == "signup":
 
     st.markdown("</div>", unsafe_allow_html=True)
 
-# LOGIN
-elif st.session_state.page == "login":
-    st.markdown("<div class='login-card'>", unsafe_allow_html=True)
-    st.markdown("<div class='login-title'>Sign in</div>", unsafe_allow_html=True)
-
-    email = st.text_input("Your email")
-    password = st.text_input("Your password", type="password")
-
-    if st.button("Sign in"):
-        st.session_state.page = "main"
-        st.session_state.user = email if email else "User"
-        st.success(f"Welcome back, {st.session_state.user}!")
-
-    if st.button("Continue as Guest"):
-        st.session_state.page = "main"
-        st.session_state.user = "Guest"
-        st.info("Logged in as Guest")
-
-    st.markdown("</div>", unsafe_allow_html=True)
-
-    st.markdown("""
-    <div style="text-align: center; margin-top: 10px;">
-        <a href='#' onclick="window.location.reload()">Forgot password?</a><br>
-        <a href='#'>Don’t have an account? <b>Sign up</b></a>
-    </div>
-    """, unsafe_allow_html=True)
-
-    if st.button("Go to Sign up"):
-        st.session_state.page = "signup"
-
+# ====================================
 # =========================================================
 # MAIN APP AFTER LOGIN
 # =========================================================

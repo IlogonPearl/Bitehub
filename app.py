@@ -44,60 +44,42 @@ def get_connection():
         schema=st.secrets["SNOWFLAKE_SCHEMA"],
     )
 
-# =========================================================
-# DATABASE HELPERS
-# =========================================================
-def get_user(email, password):
+# ----------------- SAVE FEEDBACK -----------------
+def save_feedback(item, feedback, rating):
     conn = get_connection()
     cur = conn.cursor()
-    cur.execute("SELECT id, username, email, role FROM users WHERE email=%s AND password=%s", (email, password))
-    row = cur.fetchone()
-    cur.close()
-    conn.close()
-    if row:
-        return {"id": row[0], "username": row[1], "email": row[2], "role": row[3]}
-    return None
-
-def create_user(username, email, password, role="Non-Staff"):
-    conn = get_connection()
-    cur = conn.cursor()
-    cur.execute("INSERT INTO users (username, email, password, role) VALUES (%s, %s, %s, %s)", 
-                (username, email, password, role))
+    cur.execute(
+        "INSERT INTO feedbacks (item, feedback, rating) VALUES (%s, %s, %s)",
+        (item, feedback, rating),
+    )
     conn.commit()
     cur.close()
     conn.close()
 
-def save_feedback(item, feedback, rating, user_id=None):
-    conn = get_connection()
-    cur = conn.cursor()
-    cur.execute("INSERT INTO feedbacks (item, feedback, rating, user_id) VALUES (%s, %s, %s, %s)",
-                (item, feedback, rating, user_id))
-    conn.commit()
-    cur.close()
-    conn.close()
-
+# ----------------- LOAD FEEDBACK -----------------
 def load_feedbacks():
     conn = get_connection()
     cur = conn.cursor()
-    cur.execute("""SELECT f.item, f.feedback, f.rating, f.timestamp, u.username 
-                   FROM feedbacks f 
-                   LEFT JOIN users u ON f.user_id=u.id 
-                   ORDER BY f.timestamp DESC""")
+    cur.execute("SELECT item, feedback, rating, timestamp FROM feedbacks ORDER BY timestamp DESC")
     rows = cur.fetchall()
     cur.close()
     conn.close()
-    return pd.DataFrame(rows, columns=["item", "feedback", "rating", "timestamp", "username"]) \
-        if rows else pd.DataFrame(columns=["item", "feedback", "rating", "timestamp", "username"])
+    return pd.DataFrame(rows, columns=["item", "feedback", "rating", "timestamp"]) \
+        if rows else pd.DataFrame(columns=["item", "feedback", "rating", "timestamp"])
 
-def save_receipt(order_id, items, total, payment_method, details="", user_id=None):
+# ----------------- SAVE RECEIPT -----------------
+def save_receipt(order_id, items, total, payment_method, details=""):
     conn = get_connection()
     cur = conn.cursor()
-    cur.execute("INSERT INTO receipts (order_id, items, total, payment_method, details, user_id) VALUES (%s, %s, %s, %s, %s, %s)",
-                (order_id, items, total, payment_method, details, user_id))
+    cur.execute(
+        "INSERT INTO receipts (order_id, items, total, payment_method, details) VALUES (%s, %s, %s, %s, %s)",
+        (order_id, items, total, payment_method, details),
+    )
     conn.commit()
     cur.close()
     conn.close()
 
+# ----------------- LOAD SALES -----------------
 def load_sales():
     conn = get_connection()
     cur = conn.cursor()
@@ -134,7 +116,7 @@ if "user" not in st.session_state:
     st.session_state.user = None
 
 # =========================================================
-# CUSTOM CSS
+# CUSTOM CSS (for button styling)
 # =========================================================
 st.markdown("""
 <style>
@@ -156,7 +138,7 @@ div.stButton > button {
 # LOGIN PAGE
 # =========================================================
 if st.session_state.page == "login":
-    st.markdown("<h2 style='text-align:center;'>☕ Welcome Back</h2>", unsafe_allow_html=True)
+    st.markdown("<h2>☕ Welcome Back</h2>", unsafe_allow_html=True)
 
     email = st.text_input("Email", placeholder="Enter your email")
     password = st.text_input("Password", type="password", placeholder="Enter your password")
@@ -166,21 +148,26 @@ if st.session_state.page == "login":
 
     with col1:
         if st.button("Log In"):
-            user = get_user(email, password)
-            if user:
+            if email and password:
                 st.session_state.page = "main"
-                st.session_state.user = user
+                st.session_state.user = {"email": email}
             else:
-                st.error("⚠️ Invalid email or password.")
+                st.error("⚠️ Please enter both email and password.")
 
     with col2:
         if st.button("Guest Account"):
             st.session_state.page = "main"
-            st.session_state.user = {"id": None, "username": "Guest", "role": "Guest"}
+            st.session_state.user = {"email": "Guest"}
 
     with col3:
         if st.button("Create Account"):
             st.session_state.page = "signup"
+
+    if st.button("Forgot Password"):
+        if email:
+            st.success(f"📩 Password reset instructions sent to {email}")
+        else:
+            st.warning("Please enter your email to reset password.")
 
     st.markdown('</div>', unsafe_allow_html=True)
 
@@ -189,18 +176,12 @@ if st.session_state.page == "login":
 # =========================================================
 elif st.session_state.page == "signup":
     st.markdown("<h2>✍️ Create Account</h2>", unsafe_allow_html=True)
-    new_username = st.text_input("Username")
-    new_email = st.text_input("Email")
-    new_pass = st.text_input("Password", type="password")
-    role = st.selectbox("Role", ["Non-Staff", "Staff"])
+    new_email = st.text_input("New Email")
+    new_pass = st.text_input("New Password", type="password")
 
     if st.button("Register"):
-        if new_username and new_email and new_pass:
-            create_user(new_username, new_email, new_pass, role)
-            st.success("✅ Account created! You can now log in.")
-            st.session_state.page = "login"
-        else:
-            st.warning("⚠️ Please fill all fields.")
+        st.success("✅ Account created! You can now log in.")
+        st.session_state.page = "login"
 
     if st.button("Back to Login"):
         st.session_state.page = "login"
@@ -209,160 +190,157 @@ elif st.session_state.page == "signup":
 # MAIN APP
 # =========================================================
 elif st.session_state.page == "main":
-    user = st.session_state.user
-    role = user["role"]
-    username = user["username"]
+    st.title(f"🏫 Welcome {st.session_state.user['email']} to BiteHub")
 
-    st.title(f"🏫 Welcome {username} to BiteHub")
+    # 🔓 Encouragement banner for guest
+    if st.session_state.user["email"] == "Guest":
+        st.warning("🔓 Unlock rewards! Create an account to enjoy full benefits: Loyalty points, special discounts, and priority promos")
+        if st.button("Back to Login"):
+            st.session_state.page = "login"
 
-    # ---------- NON-STAFF PORTAL ----------
-    if role in ["Non-Staff", "Guest"]:
-        if role == "Guest":
-            st.warning("🔓 Unlock rewards! Create an account to enjoy full benefits: Loyalty points, special discounts, and priority promos")
+    # ---------- Log Out ----------
+    if st.button("Log Out"):
+        st.session_state.page = "login"
+        st.session_state.user = None
+        st.success("✅ Logged out successfully!")
+        st.stop()
 
-        # AI
-        st.markdown("### 🤖 Canteen AI Assistant")
-        user_query = st.text_input("Ask me about menu, budget, feedback, or sales:")
-        if st.button("Ask AI"):
-            sales_df = load_sales()
-            feedback_df = load_feedbacks()
+    # ---------- AI ASSISTANT ----------
+    st.markdown("### 🤖 Canteen AI Assistant")
+    user_query = st.text_input("Ask me about menu, budget, feedback, or sales:")
+    if st.button("Ask AI"):
+        sales_df = load_sales()
+        feedback_df = load_feedbacks()
 
-            context = f"""
-            MENU: {menu_data}
-            SALES DATA: {sales_df.to_dict() if not sales_df.empty else "No sales"}
-            FEEDBACK DATA: {feedback_df.to_dict() if not feedback_df.empty else "No feedback"}
-            """
+        context = f"""
+        MENU: {menu_data}
+        SALES DATA: {sales_df.to_dict() if not sales_df.empty else "No sales"}
+        FEEDBACK DATA: {feedback_df.to_dict() if not feedback_df.empty else "No feedback"}
+        """
 
-            prompt = f"You are a smart AI assistant for a school canteen.\nContext: {context}\nQuestion: {user_query}"
+        prompt = f"""
+        You are a smart AI assistant for a school canteen.
+        Suggest combo meals, answer budget questions, summarize sales, share feedback.
+        Context: {context}
+        Question: {user_query}
+        """
 
-            try:
-                response = client.chat.completions.create(
-                    model="llama-3.1-8b-instant",
-                    messages=[{"role": "user", "content": prompt}],
-                )
-                st.success(response.choices[0].message.content)
-            except Exception as e:
-                st.error(f"⚠️ AI unavailable: {e}")
+        try:
+            response = client.chat.completions.create(
+                model="llama-3.1-8b-instant",
+                messages=[{"role": "user", "content": prompt}],
+            )
+            st.success(response.choices[0].message.content)
+        except Exception as e:
+            st.error(f"⚠️ AI unavailable: {e}")
 
-        st.divider()
+    st.divider()
 
-        # Place Orders
-        col1, col2 = st.columns(2)
-        with col1:
-            st.subheader("🛒 Place an Order")
+    # ---------- PLACE ORDER ----------
+    col1, col2 = st.columns(2)
 
-            if "cart" not in st.session_state:
+    with col1:
+        st.subheader("🛒 Place an Order")
+
+        if "cart" not in st.session_state:
+            st.session_state.cart = {}
+
+        for category, items in menu_data.items():
+            with st.expander(category, expanded=False):
+                for item, price in items.items():
+                    qty = st.number_input(f"{item} - ₱{price}", min_value=0, step=1, key=f"{category}_{item}")
+                    if qty > 0:
+                        st.session_state.cart[item] = qty
+                    elif item in st.session_state.cart:
+                        del st.session_state.cart[item]
+
+        if st.session_state.cart:
+            st.markdown("#### 🛒 Your Cart")
+            total = 0
+            for item, qty in st.session_state.cart.items():
+                for cat, items in menu_data.items():
+                    if item in items:
+                        price = items[item]
+                subtotal = price * qty
+                total += subtotal
+                st.write(f"{item} x {qty} = ₱{subtotal}")
+
+            st.write(f"**Total: ₱{total}**")
+
+            payment_method = st.radio("Payment Method", ["Cash", "Card", "E-Wallet"])
+            details = ""
+
+            if payment_method == "Card":
+                card_num = st.text_input("Card Number")
+                expiry = st.text_input("Expiry Date (MM/YY)")
+                cvv = st.text_input("CVV", type="password")
+                details = f"Card: {card_num}, Exp: {expiry}"
+            elif payment_method == "E-Wallet":
+                wallet_type = st.selectbox("Choose Wallet", ["GCash", "Maya", "QR Scan"])
+                details = wallet_type
+
+            if st.button("Place Order"):
+                order_id = f"ORD{random.randint(1000,9999)}"
+                items_str = ", ".join([f"{k}x{v}" for k,v in st.session_state.cart.items()])
+                save_receipt(order_id, items_str, total, payment_method, details)
+                st.success(f"✅ Order placed! Order ID: {order_id} | Total: ₱{total}")
                 st.session_state.cart = {}
 
-            for category, items in menu_data.items():
-                with st.expander(category, expanded=False):
-                    for item, price in items.items():
-                        qty = st.number_input(f"{item} - ₱{price}", min_value=0, step=1, key=f"{category}_{item}")
-                        if qty > 0:
-                            st.session_state.cart[item] = qty
-                        elif item in st.session_state.cart:
-                            del st.session_state.cart[item]
+    # ---------- FEEDBACK ----------
+    with col2:
+        st.subheader("✍️ Give Feedback")
+        feedback_item = st.selectbox("Select Item:", [i for cat in menu_data.values() for i in cat.keys()])
+        rating = st.slider("Rate this item (1-5 stars):", 1, 5, 3)
+        feedback_text = st.text_area("Your Feedback:")
+        if st.button("Submit Feedback"):
+            if feedback_text:
+                save_feedback(feedback_item, feedback_text, rating)
+                st.success("✅ Feedback submitted!")
+            else:
+                st.warning("Please write feedback before submitting.")
 
-            if st.session_state.cart:
-                st.markdown("#### 🛒 Your Cart")
-                total = 0
-                for item, qty in st.session_state.cart.items():
-                    for cat, items in menu_data.items():
-                        if item in items:
-                            price = items[item]
-                    subtotal = price * qty
-                    total += subtotal
-                    st.write(f"{item} x {qty} = ₱{subtotal}")
+    # ---------- FEEDBACK RECORDS ----------
+    st.subheader("📝 Feedback Records")
+    feedback_df = load_feedbacks()
+    if not feedback_df.empty:
+        st.dataframe(feedback_df)
+    else:
+        st.info("No feedback available yet.")
 
-                st.write(f"**Total: ₱{total}**")
+    # ---------- SALES REPORT ----------
+    st.subheader("📊 Sales Report")
+    sales_df = load_sales()
 
-                payment_method = st.radio("Payment Method", ["Cash", "Card", "E-Wallet"])
-                details = ""
+    if not sales_df.empty:
+        st.dataframe(sales_df)
 
-                if payment_method == "Card":
-                    card_num = st.text_input("Card Number")
-                    expiry = st.text_input("Expiry Date (MM/YY)")
-                    cvv = st.text_input("CVV", type="password")
-                    details = f"Card: {card_num}, Exp: {expiry}"
-                elif payment_method == "E-Wallet":
-                    wallet_type = st.selectbox("Choose Wallet", ["GCash", "Maya", "QR Scan"])
-                    details = wallet_type
+        item_to_category = {i: cat for cat, items in menu_data.items() for i in items.keys()}
 
-                if st.button("Place Order"):
-                    order_id = f"ORD{random.randint(1000,9999)}"
-                    items_str = ", ".join([f"{k}x{v}" for k,v in st.session_state.cart.items()])
-                    save_receipt(order_id, items_str, total, payment_method, details, user_id=user["id"])
-                    st.success(f"✅ Order placed! Order ID: {order_id} | Total: ₱{total}")
-                    st.session_state.cart = {}
-
-        # Feedback
-        with col2:
-            st.subheader("✍️ Give Feedback")
-            feedback_item = st.selectbox("Select Item:", [i for cat in menu_data.values() for i in cat.keys()])
-            rating = st.slider("Rate this item (1-5 stars):", 1, 5, 3)
-            feedback_text = st.text_area("Your Feedback:")
-            if st.button("Submit Feedback"):
-                if feedback_text:
-                    save_feedback(feedback_item, feedback_text, rating, user_id=user["id"])
-                    st.success("✅ Feedback submitted!")
+        expanded_rows = []
+        for _, row in sales_df.iterrows():
+            for entry in row["items"].split(","):
+                entry = entry.strip()
+                if "x" in entry:
+                    item, qty = entry.split("x")
+                    qty = int(qty)
                 else:
-                    st.warning("Please write feedback before submitting.")
+                    item, qty = entry, 1
+                expanded_rows.append({
+                    "item": item.strip(),
+                    "qty": qty,
+                    "total": row["total"],
+                    "payment_method": row["payment_method"],
+                    "timestamp": row["timestamp"],
+                    "category": item_to_category.get(item.strip(), "Other")
+                })
 
-        # Feedback Records
-        st.subheader("📝 Feedback Records")
-        feedback_df = load_feedbacks()
-        if not feedback_df.empty:
-            st.dataframe(feedback_df)
-        else:
-            st.info("No feedback available yet.")
+        expanded_df = pd.DataFrame(expanded_rows)
+        category_sales = expanded_df.groupby("category")["total"].sum()
 
-    # ---------- STAFF PORTAL ----------
-    elif role == "Staff":
-        st.success("👨‍🍳 Staff Portal Access Granted")
-
-        # Manage Menu
-        st.subheader("📋 Manage Menu")
-        st.json(menu_data)  # later replace with editable DB table
-
-        # Feedbacks
-        st.subheader("📝 Customer Feedbacks")
-        feedback_df = load_feedbacks()
-        if not feedback_df.empty:
-            st.dataframe(feedback_df)
-        else:
-            st.info("No feedback available yet.")
-
-        # Orders (Receipts)
-        st.subheader("📦 Pending Orders / Sales Report")
-        sales_df = load_sales()
-        if not sales_df.empty:
-            st.dataframe(sales_df)
-            # sales graph
-            item_to_category = {i: cat for cat, items in menu_data.items() for i in items.keys()}
-            expanded_rows = []
-            for _, row in sales_df.iterrows():
-                for entry in row["items"].split(","):
-                    entry = entry.strip()
-                    if "x" in entry:
-                        item, qty = entry.split("x")
-                        qty = int(qty)
-                    else:
-                        item, qty = entry, 1
-                    expanded_rows.append({
-                        "item": item.strip(),
-                        "qty": qty,
-                        "total": row["total"],
-                        "payment_method": row["payment_method"],
-                        "timestamp": row["timestamp"],
-                        "category": item_to_category.get(item.strip(), "Other")
-                    })
-            expanded_df = pd.DataFrame(expanded_rows)
-            category_sales = expanded_df.groupby("category")["total"].sum()
-
-            fig, ax = plt.subplots(figsize=(5,5))
-            category_sales.plot(kind="bar", ax=ax)
-            ax.set_ylabel("Total Sales (₱)")
-            ax.set_title("Sales per Category")
-            st.pyplot(fig)
-        else:
-            st.info("No sales records available yet.")
+        fig, ax = plt.subplots(figsize=(5,5))
+        category_sales.plot(kind="bar", ax=ax)
+        ax.set_ylabel("Total Sales (₱)")
+        ax.set_title("Sales per Category")
+        st.pyplot(fig)
+    else:
+        st.info("No sales records available yet.")

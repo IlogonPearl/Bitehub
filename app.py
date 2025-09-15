@@ -108,99 +108,48 @@ menu_data = {
 client = Groq(api_key=st.secrets["GROQ_API_KEY"])
 
 # =========================================================
-
-# ====================================
-# CSS for styling
-# ====================================
-st.markdown("""
-    <style>
-    div.stButton > button {
-        display: inline-block;
-        margin: 10px;         /* space between buttons */
-        width: 180px;
-        height: 50px;
-        font-size: 18px;
-        border-radius: 8px;
-    }
-    .center-buttons {
-        text-align: center;
-    }
-    </style>
-""", unsafe_allow_html=True)
-
-# =========================================================
-# LOGIN & SIGNUP SYSTEM
+# SESSION STATE
 # =========================================================
 if "page" not in st.session_state:
     st.session_state.page = "login"
+if "user" not in st.session_state:
+    st.session_state.user = None
 
-# =========================
-# =========================
-import streamlit as st
+# =========================================================
+# LOGIN PAGE
+# =========================================================
+if st.session_state.page == "login":
+    st.markdown("<h2>☕ Welcome Back</h2>", unsafe_allow_html=True)
 
-st.set_page_config(page_title="Cafe Login", layout="centered")
+    email = st.text_input("Email", placeholder="Enter your email")
+    password = st.text_input("Password", type="password", placeholder="Enter your password")
 
-# ====================================
-# Login form UI
-# ====================================
-st.markdown("<div class='login-card'>", unsafe_allow_html=True)
-st.markdown("<h2>☕ Welcome Back</h2>", unsafe_allow_html=True)
+    col1, col2, col3 = st.columns(3)
 
+    with col1:
+        if st.button("Log In"):
+            if email and password:
+                st.session_state.page = "main"
+                st.session_state.user = email
+            else:
+                st.error("⚠️ Please enter both email and password.")
 
-
-email = st.text_input("Email", placeholder="Enter your email")
-password = st.text_input("Password", type="password", placeholder="Enter your password")
-#CSS styling
-st.markdown("""
-<style>
-            div.stButton > button {
-                display: inline-block;
-                margin: 10px;         /* space between buttons */
-                width: 180px;
-                height: 50px;
-                font-size: 18px;
-                border-radius: 8px;
-            }
-            .center-buttons {
-                text-align: center;
-            }
-            </style>
-            """, unsafe_allow_html=True)
-st.markdown('<div class="center-buttons">', unsafe_allow_html=True)
-
-
-col1, col2, col3 = st.columns(3)
-
-# --- Button 1: Log In ---
-with col1:
-    if st.button("Log In", key="login_btn"):
-        if email and password:
+    with col2:
+        if st.button("Guest Account"):
             st.session_state.page = "main"
-            st.session_state.user = email
-            st.success(f"✅ Logged in as {email}")
-        else:
-            st.error("⚠️ Please enter both email and password.")
+            st.session_state.user = "Guest"
 
-# --- Button 2: Guest Account ---
-with col2:
-    if st.button("Guest Account", key="guest_btn"):
-        st.session_state.page = "main"
-        st.session_state.user = "Guest"
-        st.info("Logged in as Guest")
+    with col3:
+        if st.button("Create Account"):
+            st.session_state.page = "signup"
 
-# --- Button 3: Create Account ---
-with col3:
-    if st.button("Create Account", key="create_btn"):
-        st.session_state.page = "signup"
-# ====================================
-# Signup Page
-# ====================================
-if "page" in st.session_state and st.session_state.page == "signup":
-    st.markdown("<div class='login-card'>", unsafe_allow_html=True)
+# =========================================================
+# SIGNUP PAGE
+# =========================================================
+elif st.session_state.page == "signup":
     st.markdown("<h2>✍️ Create Account</h2>", unsafe_allow_html=True)
-
-    new_email = st.text_input("New Email", key="new_email")
-    new_pass = st.text_input("New Password", type="password", key="new_pass")
+    new_email = st.text_input("New Email")
+    new_pass = st.text_input("New Password", type="password")
 
     if st.button("Register"):
         st.success("✅ Account created! You can now log in.")
@@ -209,15 +158,15 @@ if "page" in st.session_state and st.session_state.page == "signup":
     if st.button("Back to Login"):
         st.session_state.page = "login"
 
-    st.markdown("</div>", unsafe_allow_html=True)
-
-# ====================================
 # =========================================================
-# MAIN APP AFTER LOGIN
+# MAIN APP
 # =========================================================
-if st.session_state.page == "main":
-    st.set_page_config(page_title="Canteen GenAI System", layout="wide")
+elif st.session_state.page == "main":
     st.title(f"🏫 Welcome {st.session_state.user} to Canteen GenAI System")
+
+    # 🔓 Encouragement banner for guest
+    if st.session_state.user == "Guest":
+        st.warning("🔓 Unlock rewards! Create an account to enjoy full benefits: Loyalty points, special discounts, and priority promos")
 
     # ---------- AI ASSISTANT ----------
     st.markdown("### 🤖 Canteen AI Assistant")

@@ -142,8 +142,8 @@ st.markdown("""
             """, unsafe_allow_html=True)
 st.markdown('<div class="center-buttons">', unsafe_allow_html=True)
 
-    col1, col2, col3 = st.columns(3)
-
+col1, col2, col3 = st.columns(3)
+#Button LOGIN
     with col1:
         if st.button("Log In"):
             if email and password:
@@ -325,5 +325,6 @@ elif st.session_state.page == "main":
         st.pyplot(fig)
     else:
         st.info("No sales records available yet.")
+
 
 

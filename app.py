@@ -148,9 +148,12 @@ h1, h2, h3 { color: #222; }
 </style>
 """, unsafe_allow_html=True)
 
-# Try to set background image from local `can.jpg` if available
-_image_path = os.path.join(os.path.dirname(__file__), "can.jpg")
-if os.path.exists(_image_path):
+# Load background safely for Streamlit Cloud
+image_path = "can.jpg"  # must be in the same directory as app.py
+if os.path.exists(image_path):
+    set_background(image_path)
+else:
+    st.warning("Background image not found. Please upload can.jpg in your project folder.")
     with open(_image_path, "rb") as f:
         import base64
         img_b64 = base64.b64encode(f.read()).decode()
@@ -524,3 +527,4 @@ elif st.session_state.page == "main":
         st.error("Unknown role. Please log out and log in again.")
 
 # end of app
+

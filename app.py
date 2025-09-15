@@ -44,42 +44,60 @@ def get_connection():
         schema=st.secrets["SNOWFLAKE_SCHEMA"],
     )
 
-# ----------------- SAVE FEEDBACK -----------------
-def save_feedback(item, feedback, rating):
+# =========================================================
+# DATABASE HELPERS
+# =========================================================
+def get_user(email, password):
     conn = get_connection()
     cur = conn.cursor()
-    cur.execute(
-        "INSERT INTO feedbacks (item, feedback, rating) VALUES (%s, %s, %s)",
-        (item, feedback, rating),
-    )
+    cur.execute("SELECT id, username, email, role FROM users WHERE email=%s AND password=%s", (email, password))
+    row = cur.fetchone()
+    cur.close()
+    conn.close()
+    if row:
+        return {"id": row[0], "username": row[1], "email": row[2], "role": row[3]}
+    return None
+
+def create_user(username, email, password, role="Non-Staff"):
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("INSERT INTO users (username, email, password, role) VALUES (%s, %s, %s, %s)", 
+                (username, email, password, role))
     conn.commit()
     cur.close()
     conn.close()
 
-# ----------------- LOAD FEEDBACK -----------------
+def save_feedback(item, feedback, rating, user_id=None):
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("INSERT INTO feedbacks (item, feedback, rating, user_id) VALUES (%s, %s, %s, %s)",
+                (item, feedback, rating, user_id))
+    conn.commit()
+    cur.close()
+    conn.close()
+
 def load_feedbacks():
     conn = get_connection()
     cur = conn.cursor()
-    cur.execute("SELECT item, feedback, rating, timestamp FROM feedbacks ORDER BY timestamp DESC")
+    cur.execute("""SELECT f.item, f.feedback, f.rating, f.timestamp, u.username 
+                   FROM feedbacks f 
+                   LEFT JOIN users u ON f.user_id=u.id 
+                   ORDER BY f.timestamp DESC""")
     rows = cur.fetchall()
     cur.close()
     conn.close()
-    return pd.DataFrame(rows, columns=["item", "feedback", "rating", "timestamp"]) \
-        if rows else pd.DataFrame(columns=["item", "feedback", "rating", "timestamp"])
+    return pd.DataFrame(rows, columns=["item", "feedback", "rating", "timestamp", "username"]) \
+        if rows else pd.DataFrame(columns=["item", "feedback", "rating", "timestamp", "username"])
 
-# ----------------- SAVE RECEIPT -----------------
-def save_receipt(order_id, items, total, payment_method, details=""):
+def save_receipt(order_id, items, total, payment_method, details="", user_id=None):
     conn = get_connection()
     cur = conn.cursor()
-    cur.execute(
-        "INSERT INTO receipts (order_id, items, total, payment_method, details) VALUES (%s, %s, %s, %s, %s)",
-        (order_id, items, total, payment_method, details),
-    )
+    cur.execute("INSERT INTO receipts (order_id, items, total, payment_method, details, user_id) VALUES (%s, %s, %s, %s, %s, %s)",
+                (order_id, items, total, payment_method, details, user_id))
     conn.commit()
     cur.close()
     conn.close()
 
-# ----------------- LOAD SALES -----------------
 def load_sales():
     conn = get_connection()
     cur = conn.cursor()
@@ -116,7 +134,7 @@ if "user" not in st.session_state:
     st.session_state.user = None
 
 # =========================================================
-# CUSTOM CSS (for button styling)
+# CUSTOM CSS
 # =========================================================
 st.markdown("""
 <style>
@@ -138,9 +156,9 @@ div.stButton > button {
 # LOGIN PAGE
 # =========================================================
 if st.session_state.page == "login":
-    st.markdown("<h2>☕ Welcome Back</h2>", unsafe_allow_html=True)
+    st.markdown("<h2 style='text-align:center;'>☕ Welcome Back</h2>", unsafe_allow_html=True)
 
-    username = st.text_input("Username", placeholder="Enter your username")
+    email = st.text_input("Email", placeholder="Enter your email")
     password = st.text_input("Password", type="password", placeholder="Enter your password")
 
     st.markdown('<div class="center-buttons">', unsafe_allow_html=True)
@@ -148,16 +166,17 @@ if st.session_state.page == "login":
 
     with col1:
         if st.button("Log In"):
-            if username and password:
+            user = get_user(email, password)
+            if user:
                 st.session_state.page = "main"
-                st.session_state.user = {"username": username, "role": "Non-Staff"}  # default login
+                st.session_state.user = user
             else:
-                st.error("⚠️ Please enter both username and password.")
+                st.error("⚠️ Invalid email or password.")
 
     with col2:
         if st.button("Guest Account"):
             st.session_state.page = "main"
-            st.session_state.user = {"username": "Guest", "role": "Non-Staff"}
+            st.session_state.user = {"id": None, "username": "Guest", "role": "Guest"}
 
     with col3:
         if st.button("Create Account"):
@@ -170,13 +189,18 @@ if st.session_state.page == "login":
 # =========================================================
 elif st.session_state.page == "signup":
     st.markdown("<h2>✍️ Create Account</h2>", unsafe_allow_html=True)
-    new_username = st.text_input("New Username")
-    new_pass = st.text_input("New Password", type="password")
+    new_username = st.text_input("Username")
+    new_email = st.text_input("Email")
+    new_pass = st.text_input("Password", type="password")
     role = st.selectbox("Role", ["Non-Staff", "Staff"])
 
     if st.button("Register"):
-        st.success(f"✅ Account created for {new_username} as {role}! You can now log in.")
-        st.session_state.page = "login"
+        if new_username and new_email and new_pass:
+            create_user(new_username, new_email, new_pass, role)
+            st.success("✅ Account created! You can now log in.")
+            st.session_state.page = "login"
+        else:
+            st.warning("⚠️ Please fill all fields.")
 
     if st.button("Back to Login"):
         st.session_state.page = "login"
@@ -185,15 +209,18 @@ elif st.session_state.page == "signup":
 # MAIN APP
 # =========================================================
 elif st.session_state.page == "main":
-    st.title(f"🏫 Welcome {st.session_state.user['username']} to BiteHub")
+    user = st.session_state.user
+    role = user["role"]
+    username = user["username"]
 
-    # 🚦 Separate portal for Non-Staff vs Staff
-    if st.session_state.user["role"] == "Non-Staff":
-        # 🔓 Guest encouragement banner
-        if st.session_state.user["username"] == "Guest":
+    st.title(f"🏫 Welcome {username} to BiteHub")
+
+    # ---------- NON-STAFF PORTAL ----------
+    if role in ["Non-Staff", "Guest"]:
+        if role == "Guest":
             st.warning("🔓 Unlock rewards! Create an account to enjoy full benefits: Loyalty points, special discounts, and priority promos")
 
-        # ---------- AI ASSISTANT ----------
+        # AI
         st.markdown("### 🤖 Canteen AI Assistant")
         user_query = st.text_input("Ask me about menu, budget, feedback, or sales:")
         if st.button("Ask AI"):
@@ -206,12 +233,7 @@ elif st.session_state.page == "main":
             FEEDBACK DATA: {feedback_df.to_dict() if not feedback_df.empty else "No feedback"}
             """
 
-            prompt = f"""
-            You are a smart AI assistant for a school canteen.
-            Suggest combo meals, answer budget questions, summarize sales, share feedback.
-            Context: {context}
-            Question: {user_query}
-            """
+            prompt = f"You are a smart AI assistant for a school canteen.\nContext: {context}\nQuestion: {user_query}"
 
             try:
                 response = client.chat.completions.create(
@@ -224,10 +246,11 @@ elif st.session_state.page == "main":
 
         st.divider()
 
-        # ---------- PLACE ORDER ----------
+        # Place Orders
         col1, col2 = st.columns(2)
         with col1:
             st.subheader("🛒 Place an Order")
+
             if "cart" not in st.session_state:
                 st.session_state.cart = {}
 
@@ -268,11 +291,11 @@ elif st.session_state.page == "main":
                 if st.button("Place Order"):
                     order_id = f"ORD{random.randint(1000,9999)}"
                     items_str = ", ".join([f"{k}x{v}" for k,v in st.session_state.cart.items()])
-                    save_receipt(order_id, items_str, total, payment_method, details)
+                    save_receipt(order_id, items_str, total, payment_method, details, user_id=user["id"])
                     st.success(f"✅ Order placed! Order ID: {order_id} | Total: ₱{total}")
                     st.session_state.cart = {}
 
-        # ---------- FEEDBACK ----------
+        # Feedback
         with col2:
             st.subheader("✍️ Give Feedback")
             feedback_item = st.selectbox("Select Item:", [i for cat in menu_data.values() for i in cat.keys()])
@@ -280,35 +303,41 @@ elif st.session_state.page == "main":
             feedback_text = st.text_area("Your Feedback:")
             if st.button("Submit Feedback"):
                 if feedback_text:
-                    save_feedback(feedback_item, feedback_text, rating)
+                    save_feedback(feedback_item, feedback_text, rating, user_id=user["id"])
                     st.success("✅ Feedback submitted!")
                 else:
                     st.warning("Please write feedback before submitting.")
 
-    # =========================================================
-    # STAFF PORTAL
-    # =========================================================
-    elif st.session_state.user["role"] == "Staff":
-        st.success("👨‍🍳 Staff Portal Access Granted")
-
-        # ---------- MENU MANAGEMENT ----------
-        st.subheader("📋 Manage Menu")
-        st.info("Here staff can edit/add/remove menu items (future expansion).")
-
-        # ---------- FEEDBACK ----------
-        st.subheader("📝 Customer Feedback")
+        # Feedback Records
+        st.subheader("📝 Feedback Records")
         feedback_df = load_feedbacks()
         if not feedback_df.empty:
             st.dataframe(feedback_df)
         else:
             st.info("No feedback available yet.")
 
-        # ---------- SALES ----------
-        st.subheader("📊 Sales Report")
+    # ---------- STAFF PORTAL ----------
+    elif role == "Staff":
+        st.success("👨‍🍳 Staff Portal Access Granted")
+
+        # Manage Menu
+        st.subheader("📋 Manage Menu")
+        st.json(menu_data)  # later replace with editable DB table
+
+        # Feedbacks
+        st.subheader("📝 Customer Feedbacks")
+        feedback_df = load_feedbacks()
+        if not feedback_df.empty:
+            st.dataframe(feedback_df)
+        else:
+            st.info("No feedback available yet.")
+
+        # Orders (Receipts)
+        st.subheader("📦 Pending Orders / Sales Report")
         sales_df = load_sales()
         if not sales_df.empty:
             st.dataframe(sales_df)
-
+            # sales graph
             item_to_category = {i: cat for cat, items in menu_data.items() for i in items.keys()}
             expanded_rows = []
             for _, row in sales_df.iterrows():
@@ -327,7 +356,6 @@ elif st.session_state.page == "main":
                         "timestamp": row["timestamp"],
                         "category": item_to_category.get(item.strip(), "Other")
                     })
-
             expanded_df = pd.DataFrame(expanded_rows)
             category_sales = expanded_df.groupby("category")["total"].sum()
 

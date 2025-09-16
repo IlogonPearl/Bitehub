@@ -249,6 +249,7 @@ if "notifications" not in st.session_state:
 st.set_page_config(page_title="BiteHub Canteen GenAI", layout="wide")
 st.markdown("""
 <style>
+/* Button uniform style */
 div.stButton > button {
     display: inline-block;
     margin: 8px;
@@ -257,13 +258,23 @@ div.stButton > button {
     font-size: 15px;
     border-radius: 8px;
 }
+/* Center container for login/signup */
 .center-buttons { text-align:center; }
 .login-card {
     background: rgba(255,255,255,0.95);
     padding: 20px;
     border-radius: 10px;
-    max-width: 520px;
-    margin: auto;
+    max-width: 720px;
+    margin: 12px auto;
+    box-shadow: 0 6px 20px rgba(0,0,0,0.25);
+}
+/* tighten top spacing on the page title area so no stray white box appears */
+[data-testid="stAppViewContainer"] > section:first-child {
+    padding-top: 6px;
+}
+/* small responsive tweaks for the login inputs */
+.login-card .stTextInput>div>div>input, .login-card .stTextInput>div>div>textarea {
+    background: rgba(255,255,255,0.98);
 }
 </style>
 """, unsafe_allow_html=True)
@@ -314,12 +325,13 @@ def run_ai(question, extra_context=""):
 # Password validator
 # ---------------------------
 def password_valid_rules(pw: str):
+    # symbol check: any non-alphanumeric and non-space character
     rules = {
         "length": len(pw) >= 12,
         "upper": bool(re.search(r"[A-Z]", pw)),
         "lower": bool(re.search(r"[a-z]", pw)),
         "digit": bool(re.search(r"[0-9]", pw)),
-        "symbol": bool(re.search(r"[!@#$%^&*(),.?\":{}|<>\\[\\];'`~\-_=+\\/]", pw))
+        "symbol": bool(re.search(r"[^\w\s]", pw))  # improved symbol detection
     }
     return rules
 
@@ -370,7 +382,6 @@ elif st.session_state.page == "signup":
 
     # live validation
     rules = password_valid_rules(new_pass)
-    ok_count = sum(rules.values())
     st.markdown("**Password rules:** (all must be green to enable Register)")
     st.write(f"- Minimum 12 chars: {'✅' if rules['length'] else '❌'}")
     st.write(f"- Uppercase letter: {'✅' if rules['upper'] else '❌'}")
@@ -407,6 +418,10 @@ elif st.session_state.page == "main":
     if "points" not in user:
         user["points"] = user.get("points", 0)
 
+    # Guest banner placed at the top (above AI)
+    if user["username"] == "Guest":
+        st.warning("🔓 You're on a Guest session. Create an account to enjoy loyalty points, promos, and feedback posting.")
+
     st.title(f"🏫 Welcome {user['username']} to BiteHub")
 
     # COMMON: AI assistant area for all roles (Non-Staff and Staff)
@@ -429,9 +444,6 @@ elif st.session_state.page == "main":
     # Non-Staff view (also applies to Guest with some limits)
     if user["role"] == "Non-Staff":
         is_guest = (user["username"] == "Guest")
-        if is_guest:
-            st.warning("🔓 You're on a Guest session. Create an account to enjoy loyalty points, promos, and feedback posting.")
-            st.info("Guest has access to AI, ordering, track order, notifications. Guests cannot leave feedback or use loyalty points.")
 
         colA, colB = st.columns([2,1])
 

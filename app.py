@@ -482,69 +482,71 @@ elif st.session_state.page == "main":
         if st.button("Log Out", key="logout_btn"):
             st.session_state.page = "login"
             st.session_state.user = None
-# -------------------------------------------------
-    # Staff Portal
-    # -------------------------------------------------
-    elif user["role"] == "Staff":
-        st.success("👨‍🍳 Staff Portal")
+# ---------------- Staff Portal ----------------
+elif user["role"] == "Staff":
+    st.success("🛠️ Staff Portal")
 
-        st.subheader("🤖 Staff AI Assistant")
-        staff_q = st.text_input("Ask Staff AI")
-        if st.button("Ask Staff AI"):
-            sales = load_receipts_df().head(20).to_dict()
-            fb = load_feedbacks_df().head(20).to_dict()
-            st.info(run_ai(staff_q, f"Sales: {sales}\nFeedback: {fb}"))
+    st.subheader("🤖 Staff AI Assistant")
+    if st.button("Ask Staff AI"):
+        sales = load_receipts_df().head(20).to_dict()
+        fb = load_feedbacks_df().head(20).to_dict()
+        st.info(run_ai(staff_q, f"Sales: {sales}\nFeedback: {fb}"))
 
-        st.subheader("📋 Manage Menu")
-        cat = st.selectbox("Category", list(menu_data.keys()))
-        item = st.text_input("Item")
-        price = st.number_input("Price", 0.0, 999.0, 10.0)
-        if st.button("Add/Update"):
-            menu_data[cat][item] = price
-            st.success(f"{item} updated in {cat}")
+    st.subheader("📋 Manage Menu")
+    cat = st.selectbox("Category", list(menu_data.keys()))
+    item = st.text_input("Item")
+    price = st.number_input("Price", 0.0, 999.0, 10.0)
+    if st.button("Add/Update"):
+        menu_data[cat][item] = price
+        st.success(f"{item} updated in {cat}")
 
-        sel = st.selectbox("Select Item", ["(none)"] + [i for c in menu_data.values() for i in c.keys()])
-        if sel != "(none)":
-            if st.button("Sold Out"):
-                st.session_state.sold_out.add(sel)
-            if st.button("Available"):
-                st.session_state.sold_out.discard(sel)
-            if st.button("Remove"):
-                for c in menu_data:
-                    menu_data[c].pop(sel, None)
+    sel = st.selectbox("Select Item", ["(none)"] + [i for c in menu_data.values() for i in c.keys()])
+    if sel != "(none)":
+        if st.button("Sold Out"):
+            st.session_state.sold_out.add(sel)
+        if st.button("Available"):
+            st.session_state.sold_out.discard(sel)
+        if st.button("Remove"):
+            for c in menu_data:
+                menu_data[c].pop(sel, None)
 
-        st.subheader("📝 Feedbacks")
-        fb = load_feedbacks_df()
-        st.dataframe(fb)
+    st.subheader("📝 Feedbacks")
+    fb = load_feedbacks_df()
+    st.dataframe(fb)
 
-        st.subheader("📦 Pending Orders")
+    # ✅ Only staff can see pending orders
+    st.subheader("📦 Pending Orders")
+    try:
+        receipts_df = load_receipts_df()
+        if not receipts_df.empty:
+            receipts_df["parsed"] = receipts_df["details"].fillna("").apply(
+                lambda d: dict([p.split(":", 1) for p in d.split("|") if ":" in p])
+            )
+            receipts_df["user"] = receipts_df["parsed"].apply(lambda p: p.get("user", ""))
+            receipts_df["status"] = receipts_df["parsed"].apply(lambda p: p.get("status", "unknown"))
+            receipts_df["pickup"] = receipts_df["parsed"].apply(lambda p: p.get("pickup", ""))
 
-try:
-    receipts_df = load_receipts_df()
-    if not receipts_df.empty:
-        # Parse details into dictionary
-        receipts_df["parsed"] = receipts_df["details"].fillna("").apply(
-            lambda d: dict([p.split(":", 1) for p in d.split("|") if ":" in p])
-        )
-        receipts_df["user"] = receipts_df["parsed"].apply(lambda p: p.get("user", ""))
-        receipts_df["status"] = receipts_df["parsed"].apply(lambda p: p.get("status", "unknown"))
-        receipts_df["pickup"] = receipts_df["parsed"].apply(lambda p: p.get("pickup", ""))
+            pending = receipts_df[receipts_df["status"] == "pending"]
 
-        # Filter pending
-        pending = receipts_df[receipts_df["status"] == "pending"]
-
-        if not pending.empty:
-            for i, row in pending.iterrows():
-                st.write(f"**Order {row['order_id']}** — {row['items']} | Pickup: {row['pickup']} | By {row['user']}")
-                if st.button(f"Mark Ready — {row['order_id']}", key=f"ready_{row['order_id']}"):
-                    success = update_receipt_status(row["order_id"], "ready for pickup")
-                    if success:
-                        st.success(f"✅ Order {row['order_id']} marked as Ready for Pickup")
-                    else:
-                        st.error("⚠️ Could not update order status.")
+            if not pending.empty:
+                for i, row in pending.iterrows():
+                    st.write(f"**Order {row['order_id']}** — {row['items']} | Pickup: {row['pickup']} | By {row['user']}")
+                    if st.button(f"Mark Ready — {row['order_id']}", key=f"ready_{row['order_id']}"):
+                        success = update_receipt_status(row["order_id"], "ready for pickup")
+                        if success:
+                            st.success(f"✅ Order {row['order_id']} marked as Ready for Pickup")
+                        else:
+                            st.error("⚠️ Could not update order status.")
+            else:
+                st.info("No pending orders.")
         else:
-            st.info("No pending orders.")
-    else:
-        st.info("No receipts yet.")
-except Exception as e:
-    st.error(f"Could not load pending orders: {e}")
+            st.info("No receipts yet.")
+    except Exception as e:
+        st.error(f"Could not load pending orders: {e}")
+
+    st.subheader("📊 All Sales")
+    st.dataframe(load_receipts_df())
+
+    if st.button("Log Out"):
+        st.session_state.page = "login"
+        st.session_state.user = None

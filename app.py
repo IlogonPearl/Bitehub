@@ -1,4 +1,4 @@
-app.py - BiteHub (compiled) with header hidden and loyalty_points rename
+#app.py - BiteHub (compiled) with header hidden and loyalty_points rename
 
 import os 
 import base64 
@@ -539,5 +539,6 @@ elif st.session_state.page == "main":
         if st.button("Log Out", key="logout_staff"):
             st.session_state.page = "login"
             st.session_state.user = None
+
 
 

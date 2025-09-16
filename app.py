@@ -2,8 +2,8 @@ import os
 import base64 
 import streamlit as st 
 import pandas as pd 
-import snowflake.connector from groq 
-import Groq 
+import snowflake.connector 
+from groq import Groq 
 import random from datetime 
 import datetime, date, time 
 import matplotlib.pyplot as plt
@@ -264,4 +264,5 @@ elif user["role"] == "Staff":
     if st.button("Log Out"):
         st.session_state.page = "login"
         st.session_state.user = None
+
 

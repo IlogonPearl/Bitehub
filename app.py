@@ -1,291 +1,124 @@
-# app.py - BiteHub (compiled) with Snowflake-safe schema upgrades and full portals
-import os
-import base64
-import streamlit as st
-import pandas as pd
-import snowflake.connector
-from groq import Groq
-import random
-from datetime import datetime, date, time
-import matplotlib.pyplot as plt
-import hashlib
-import secrets
+app.py - BiteHub (compiled) with header hidden and loyalty_points rename
+
+import os 
+import base64 
+import streamlit as st 
+import pandas as pd 
+import snowflake.connector 
+from groq import Groq 
+import random 
+from datetime import datetime, date, time 
+import matplotlib.pyplot as plt 
+import hashlib 
+import secrets 
 import re
 
-# ---------------------------
-# Snowflake connection helper
-# ---------------------------
-def get_connection():
-    return snowflake.connector.connect(
-        user=st.secrets["SNOWFLAKE_USER"],
-        password=st.secrets["SNOWFLAKE_PASSWORD"],
-        account=st.secrets["SNOWFLAKE_ACCOUNT"],
-        warehouse=st.secrets["SNOWFLAKE_WAREHOUSE"],
-        database=st.secrets["SNOWFLAKE_DATABASE"],
-        schema=st.secrets["SNOWFLAKE_SCHEMA"],
-    )
+---------------------------
 
-# ---------------------------
-# Ensure tables & columns exist
-# ---------------------------
-def ensure_tables_and_columns():
-    try:
-        conn = get_connection()
-        cur = conn.cursor()
-        # accounts
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS accounts (
-                username VARCHAR PRIMARY KEY,
-                password VARCHAR,
-                role VARCHAR,
-                loyalty_points INT DEFAULT 0,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-        # feedbacks
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS feedbacks (
-                id INT AUTOINCREMENT PRIMARY KEY,
-                item VARCHAR,
-                feedback VARCHAR,
-                rating INT,
-                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-        # receipts
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS receipts (
-                id INT AUTOINCREMENT PRIMARY KEY,
-                order_id VARCHAR UNIQUE,
-                user_id VARCHAR,
-                items TEXT,
-                total FLOAT,
-                payment_method VARCHAR,
-                details TEXT,
-                pickup_time TIMESTAMP_NTZ,
-                status VARCHAR,
-                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-    finally:
-        try:
-            cur.close()
-            conn.commit()
-            conn.close()
-        except Exception:
-            pass
+Snowflake connection helper
 
-# Run schema ensure (wrap in try so app still runs if credentials missing)
-try:
-    ensure_tables_and_columns()
-except Exception as e:
-    st.warning(f"Could not ensure DB schema (continue in limited/local mode): {e}")
+---------------------------
 
-# ---------------------------
-# Password utilities (PBKDF2)
-# ---------------------------
-def hash_password(password: str, salt: bytes | None = None) -> str:
-    if salt is None:
-        salt = secrets.token_bytes(16)
-    hashed = hashlib.pbkdf2_hmac("sha256", password.encode(), salt, 200_000)
-    return salt.hex() + "$" + hashed.hex()
+def get_connection(): return snowflake.connector.connect( user=st.secrets["SNOWFLAKE_USER"], password=st.secrets["SNOWFLAKE_PASSWORD"], account=st.secrets["SNOWFLAKE_ACCOUNT"], warehouse=st.secrets["SNOWFLAKE_WAREHOUSE"], database=st.secrets["SNOWFLAKE_DATABASE"], schema=st.secrets["SNOWFLAKE_SCHEMA"], )
 
-def verify_password(stored: str, provided_password: str) -> bool:
-    try:
-        salt_hex, hash_hex = stored.split("$", 1)
-        salt = bytes.fromhex(salt_hex)
-        expected = hashlib.pbkdf2_hmac("sha256", provided_password.encode(), salt, 200_000)
-        return expected.hex() == hash_hex
-    except Exception:
-        return False
+---------------------------
 
-# ---------------------------
-# DB helpers: accounts / feedback / receipts / loyalty points
-# ---------------------------
-def save_account(username, password, role="Non-Staff"):
-    conn = get_connection()
-    cur = conn.cursor()
-    hashed = hash_password(password)
-    try:
-        cur.execute("INSERT INTO accounts (username, password, role) VALUES (%s, %s, %s)", (username, hashed, role))
-        conn.commit()
-    finally:
-        cur.close()
-        conn.close()
+Ensure tables & columns exist
 
-def get_account(username):
-    conn = get_connection()
-    cur = conn.cursor()
-    try:
-        cur.execute("SELECT username, password, role, loyalty_points FROM accounts WHERE username=%s", (username,))
-        row = cur.fetchone()
-    finally:
-        cur.close()
-        conn.close()
-    if row:
-        return {"username": row[0], "password": row[1], "role": row[2], "loyalty_points": int(row[3] or 0)}
-    return None
+---------------------------
 
-def validate_account(username, password):
-    acc = get_account(username)
-    if not acc:
-        return None
-    if verify_password(acc["password"], password):
-        return {"username": acc["username"], "role": acc["role"], "loyalty_points": acc["loyalty_points"]}
-    return None
+def ensure_tables_and_columns(): try: conn = get_connection() cur = conn.cursor() # accounts cur.execute(""" CREATE TABLE IF NOT EXISTS accounts ( username VARCHAR PRIMARY KEY, password VARCHAR, role VARCHAR, loyalty_points INT DEFAULT 0, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ) """) # feedbacks cur.execute(""" CREATE TABLE IF NOT EXISTS feedbacks ( id INT AUTOINCREMENT PRIMARY KEY, item VARCHAR, feedback VARCHAR, rating INT, timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP ) """) # receipts cur.execute(""" CREATE TABLE IF NOT EXISTS receipts ( id INT AUTOINCREMENT PRIMARY KEY, order_id VARCHAR UNIQUE, user_id VARCHAR, items TEXT, total FLOAT, payment_method VARCHAR, details TEXT, pickup_time TIMESTAMP_NTZ, status VARCHAR, timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP ) """) finally: try: cur.close() conn.commit() conn.close() except Exception: pass
 
-def update_loyalty_points(username, delta):
-    conn = get_connection()
-    cur = conn.cursor()
-    try:
-        cur.execute("UPDATE accounts SET loyalty_points = COALESCE(loyalty_points,0) + %s WHERE username=%s", (int(delta), username))
-        conn.commit()
-        cur.execute("SELECT loyalty_points FROM accounts WHERE username=%s", (username,))
-        r = cur.fetchone()
-        return int(r[0] or 0) if r else None
-    finally:
-        cur.close()
-        conn.close()
+Run schema ensure
 
-# feedbacks
-def save_feedback(item, feedback, rating, username="Anon"):
-    conn = get_connection()
-    cur = conn.cursor()
-    try:
-        cur.execute("INSERT INTO feedbacks (item, feedback, rating) VALUES (%s, %s, %s)", (item, f"{username}: {feedback}", rating))
-        conn.commit()
-    finally:
-        cur.close()
-        conn.close()
+try: ensure_tables_and_columns() except Exception as e: st.warning(f"Could not ensure DB schema: {e}")
 
-def load_feedbacks_df():
-    conn = get_connection()
-    cur = conn.cursor()
-    try:
-        cur.execute("SELECT item, feedback, rating, timestamp FROM feedbacks ORDER BY timestamp DESC")
-        rows = cur.fetchall()
-    finally:
-        cur.close()
-        conn.close()
-    if rows:
-        return pd.DataFrame(rows, columns=["item", "feedback", "rating", "timestamp"])
-    return pd.DataFrame(columns=["item", "feedback", "rating", "timestamp"])
+---------------------------
 
-# receipts
-def save_receipt(order_id, items, total, payment_method, details="", pickup_time=None, status="Pending", user_id=None):
-    conn = get_connection()
-    cur = conn.cursor()
-    try:
-        cur.execute("INSERT INTO receipts (order_id, user_id, items, total, payment_method, details, pickup_time, status) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
-                    (order_id, user_id, items, float(total), payment_method, details, pickup_time, status))
-        conn.commit()
-    finally:
-        cur.close()
-        conn.close()
+Password utilities
 
-def load_receipts_df():
-    conn = get_connection()
-    cur = conn.cursor()
-    try:
-        cur.execute("SELECT order_id, user_id, items, total, payment_method, details, pickup_time, status, timestamp FROM receipts ORDER BY timestamp DESC")
-        rows = cur.fetchall()
-    finally:
-        cur.close()
-        conn.close()
-    if rows:
-        return pd.DataFrame(rows, columns=["order_id", "user_id", "items", "total", "payment_method", "details", "pickup_time", "status", "timestamp"])
-    return pd.DataFrame(columns=["order_id", "user_id", "items", "total", "payment_method", "details", "pickup_time", "status", "timestamp"])
+---------------------------
 
-def set_receipt_status(order_id, new_status):
-    conn = get_connection()
-    cur = conn.cursor()
-    try:
-        cur.execute("UPDATE receipts SET status=%s WHERE order_id=%s", (new_status, order_id))
-        conn.commit()
-    finally:
-        cur.close()
-        conn.close()
-    return True
+def hash_password(password: str, salt: bytes | None = None) -> str: if salt is None: salt = secrets.token_bytes(16) hashed = hashlib.pbkdf2_hmac("sha256", password.encode(), salt, 200_000) return salt.hex() + "$" + hashed.hex()
 
-# ---------------------------
-# In-memory menu + sold_out state (demo)
-# ---------------------------
-menu_data = {
-    "Breakfast": {"Tapsilog": 70, "Longsilog": 65, "Hotdog Meal": 50, "Omelette": 45},
-    "Lunch": {"Chicken Adobo": 90, "Pork Sinigang": 100, "Beef Caldereta": 120, "Rice": 15},
-    "Snack": {"Burger": 50, "Fries": 30, "Siomai Rice": 60, "Spaghetti": 45},
-    "Drinks": {"Soda": 20, "Iced Tea": 25, "Bottled Water": 15, "Coffee": 30},
-    "Dessert": {"Halo-Halo": 65, "Leche Flan": 40, "Ice Cream": 35},
-    "Dinner": {"Grilled Chicken": 95, "Sisig": 110, "Fried Bangus": 85, "Rice": 15},
-}
-if "sold_out" not in st.session_state:
-    st.session_state.sold_out = set()
+def verify_password(stored: str, provided_password: str) -> bool: try: salt_hex, hash_hex = stored.split("$", 1) salt = bytes.fromhex(salt_hex) expected = hashlib.pbkdf2_hmac("sha256", provided_password.encode(), salt, 200_000) return expected.hex() == hash_hex except Exception: return False
 
-# ---------------------------
-# Groq client
-# ---------------------------
-try:
-    client = Groq(api_key=st.secrets["GROQ_API_KEY"])
-except Exception:
-    client = None
+---------------------------
 
-# ---------------------------
-# Session init
-# ---------------------------
-if "page" not in st.session_state:
-    st.session_state.page = "login"
-if "user" not in st.session_state:
-    st.session_state.user = None
-if "cart" not in st.session_state:
-    st.session_state.cart = {}
-if "loyalty_points" not in st.session_state:
-    st.session_state.loyalty_points = 0
-if "notifications" not in st.session_state:
-    st.session_state.notifications = []
+DB helpers
 
-# ---------------------------
-# UI setup + background
-# ---------------------------
-st.set_page_config(page_title="BiteHub Canteen GenAI", layout="wide")
-st.markdown("""
+---------------------------
+
+def save_account(username, password, role="Non-Staff"): conn = get_connection() cur = conn.cursor() hashed = hash_password(password) try: cur.execute("INSERT INTO accounts (username, password, role) VALUES (%s, %s, %s)", (username, hashed, role)) conn.commit() finally: cur.close() conn.close()
+
+def get_account(username): conn = get_connection() cur = conn.cursor() try: cur.execute("SELECT username, password, role, loyalty_points FROM accounts WHERE username=%s", (username,)) row = cur.fetchone() finally: cur.close() conn.close() if row: return {"username": row[0], "password": row[1], "role": row[2], "loyalty_points": int(row[3] or 0)} return None
+
+def validate_account(username, password): acc = get_account(username) if not acc: return None if verify_password(acc["password"], password): return {"username": acc["username"], "role": acc["role"], "loyalty_points": acc["loyalty_points"]} return None
+
+def update_loyalty_points(username, delta): conn = get_connection() cur = conn.cursor() try: cur.execute("UPDATE accounts SET loyalty_points = COALESCE(loyalty_points,0) + %s WHERE username=%s", (int(delta), username)) conn.commit() cur.execute("SELECT loyalty_points FROM accounts WHERE username=%s", (username,)) r = cur.fetchone() return int(r[0] or 0) if r else None finally: cur.close() conn.close()
+
+def save_feedback(item, feedback, rating, username="Anon"): conn = get_connection() cur = conn.cursor() try: cur.execute("INSERT INTO feedbacks (item, feedback, rating) VALUES (%s, %s, %s)", (item, f"{username}: {feedback}", rating)) conn.commit() finally: cur.close() conn.close()
+
+def load_feedbacks_df(): conn = get_connection() cur = conn.cursor() try: cur.execute("SELECT item, feedback, rating, timestamp FROM feedbacks ORDER BY timestamp DESC") rows = cur.fetchall() finally: cur.close() conn.close() if rows: return pd.DataFrame(rows, columns=["item", "feedback", "rating", "timestamp"]) return pd.DataFrame(columns=["item", "feedback", "rating", "timestamp"])
+
+def save_receipt(order_id, items, total, payment_method, details="", pickup_time=None, status="Pending", user_id=None): conn = get_connection() cur = conn.cursor() try: cur.execute("INSERT INTO receipts (order_id, user_id, items, total, payment_method, details, pickup_time, status) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)", (order_id, user_id, items, float(total), payment_method, details, pickup_time, status)) conn.commit() finally: cur.close() conn.close()
+
+def load_receipts_df(): conn = get_connection() cur = conn.cursor() try: cur.execute("SELECT order_id, user_id, items, total, payment_method, details, pickup_time, status, timestamp FROM receipts ORDER BY timestamp DESC") rows = cur.fetchall() finally: cur.close() conn.close() if rows: return pd.DataFrame(rows, columns=["order_id", "user_id", "items", "total", "payment_method", "details", "pickup_time", "status", "timestamp"]) return pd.DataFrame(columns=["order_id", "user_id", "items", "total", "payment_method", "details", "pickup_time", "status", "timestamp"])
+
+def set_receipt_status(order_id, new_status): conn = get_connection() cur = conn.cursor() try: cur.execute("UPDATE receipts SET status=%s WHERE order_id=%s", (new_status, order_id)) conn.commit() finally: cur.close() conn.close() return True
+
+---------------------------
+
+Menu data
+
+---------------------------
+
+menu_data = { "Breakfast": {"Tapsilog": 70, "Longsilog": 65, "Hotdog Meal": 50, "Omelette": 45}, "Lunch": {"Chicken Adobo": 90, "Pork Sinigang": 100, "Beef Caldereta": 120, "Rice": 15}, "Snack": {"Burger": 50, "Fries": 30, "Siomai Rice": 60, "Spaghetti": 45}, "Drinks": {"Soda": 20, "Iced Tea": 25, "Bottled Water": 15, "Coffee": 30}, "Dessert": {"Halo-Halo": 65, "Leche Flan": 40, "Ice Cream": 35}, "Dinner": {"Grilled Chicken": 95, "Sisig": 110, "Fried Bangus": 85, "Rice": 15}, } if "sold_out" not in st.session_state: st.session_state.sold_out = set()
+
+---------------------------
+
+Groq client
+
+---------------------------
+
+try: client = Groq(api_key=st.secrets["GROQ_API_KEY"]) except Exception: client = None
+
+---------------------------
+
+Session state init
+
+---------------------------
+
+if "page" not in st.session_state: st.session_state.page = "login" if "user" not in st.session_state: st.session_state.user = None if "cart" not in st.session_state: st.session_state.cart = {} if "loyalty_points" not in st.session_state: st.session_state.loyalty_points = 0 if "notifications" not in st.session_state: st.session_state.notifications = []
+
+---------------------------
+
+UI setup
+
+---------------------------
+
+st.set_page_config(page_title="BiteHub Canteen GenAI", layout="wide") st.markdown("""
+
 <style>
-/* Hide Streamlit's default header (fix white bar issue) */
-header[data-testid="stHeader"] {
-    display: none;
-}
-/* Button uniform style */
-div.stButton > button {
-    display: inline-block;
-    margin: 8px;
-    width: 180px;
-    height: 44px;
-    font-size: 15px;
-    border-radius: 8px;
-}
-/* Center container for login/signup */
+header[data-testid="stHeader"] { display: none; }
+div.stButton > button { width:180px; height:44px; margin:8px; font-size:15px; border-radius:8px; }
 .center-buttons { text-align:center; }
-.login-card {
-    background: rgba(255,255,255,0.95);
-    padding: 20px;
-    border-radius: 10px;
-    max-width: 720px;
-    margin: 12px auto;
-    box-shadow: 0 6px 20px rgba(0,0,0,0.25);
-}
-/* tighten top spacing */
-[data-testid="stAppViewContainer"] > section:first-child {
-    padding-top: 6px;
-}
-</style>
-""", unsafe_allow_html=True)
+.login-card { background:rgba(255,255,255,0.95); padding:20px; border-radius:10px; max-width:720px; margin:12px auto; box-shadow:0 6px 20px rgba(0,0,0,0.25); }
+[data-testid="stAppViewContainer"] > section:first-child { padding-top:6px; }
+</style>""", unsafe_allow_html=True)
 
-# ---------------------------
-# (continue with your full portal code: login, signup, ordering, feedback, receipts)
-# IMPORTANT: 
-# - replace every session_state.points with session_state.loyalty_points
-# - replace every function call to update_points with update_loyalty_points
-# - adjust discount calculations to use loyalty_points
-# ---------------------------
+---------------------------
+
+Main app pages (login/signup/etc.) would continue here
+
+Replace all references of st.session_state.points with st.session_state.loyalty_points
+
+Replace update_points() calls with update_loyalty_points()
+
+Apply discounts and display balances using loyalty_points
+
+---------------------------
+
 
 # background image loader (optional)
 def set_background(image_path):
@@ -706,4 +539,5 @@ elif st.session_state.page == "main":
         if st.button("Log Out", key="logout_staff"):
             st.session_state.page = "login"
             st.session_state.user = None
+
 

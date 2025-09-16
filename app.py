@@ -353,252 +353,66 @@ elif st.session_state.page == "main":
     user = st.session_state.user or {"username": "Guest", "role": "Non-Staff"}
     st.title(f"🏫 Welcome {user['username']} to BiteHub")
 
-    # AI helper
-    def run_ai(question, extra_context=""):
-        if not question:
-            return "Please ask something."
-        menu_text = ", ".join([f"{item} ({price})" for cat in menu_data.values() for item, price in cat.items()])
-        context = f"MENU: {menu_text}\n{extra_context}"
-        prompt = f"You are a canteen assistant. Context: {context}\nUser question: {question}"
-        try:
-            resp = client.chat.completions.create(
-                model="llama-3.1-8b-instant",
-                messages=[{"role":"user","content":prompt}],
-            )
-            return resp.choices[0].message.content
-        except Exception as e:
-            return f"⚠️ AI unavailable: {e}"
-
-    # Non-Staff view
     if user["role"] == "Non-Staff":
-        if user["username"] == "Guest":
-            st.warning("🔓 You're using Guest. Create an account and enjoy promotions like Loyalty points, Surprise Promos.")
+        # ... (your Non-Staff code here, keep as is)
+        pass  
 
-        st.subheader("🤖 Canteen AI Assistant")
-        q = st.text_input("Ask about menu, budget, feedback, or sales:", key="ai_query")
-        if st.button("Ask AI", key="ai_button"):
-            with st.spinner("Asking AI..."):
-                st.info(run_ai(q))
+    elif user["role"] == "Staff":
+        st.title("🛠️ BiteHub Staff Portal")
+        choice = st.sidebar.radio(
+            "Staff Menu",
+            ["Dashboard", "Pending Orders", "Add Menu", "AI Assistant", "Feedback Review", "Sales Report"]
+        )
 
-        st.divider()
-        colA, colB = st.columns([2,1])
+        if choice == "Dashboard":
+            st.subheader("📊 Staff Dashboard")
+            st.info("Welcome to the staff panel. Use the sidebar to navigate.")
 
-        # Menu & ordering
-        with colA:
-            st.subheader("📋 Menu")
-            for cat, items in menu_data.items():
-                with st.expander(cat):
-                    for item_name, price in items.items():
-                        if item_name in st.session_state.sold_out:
-                            st.write(f"~~{item_name}~~ — Sold out")
-                            continue
-                        cols = st.columns([1,1,1])
-                        qty_key = f"qty_{cat}_{item_name}"
-                        qty = cols[0].number_input(f"{item_name} (₱{price})", min_value=0, value=0, step=1, key=qty_key)
-                        if cols[1].button("Add", key=f"add_{cat}_{item_name}") and qty>0:
-                            st.session_state.cart[item_name] = st.session_state.cart.get(item_name,0) + qty
-                            st.success(f"Added {qty} x {item_name}")
-
-            # cart summary
-            if st.session_state.cart:
-                st.subheader("🛒 Your Cart")
-                total = 0
-                for it, qtt in st.session_state.cart.items():
-                    price = next((p for cat in menu_data.values() for n,p in cat.items() if n==it), 0)
-                    st.write(f"{it} x {qtt} = ₱{price*qtt}")
-                    total += price*qtt
-
-                st.write(f"**Subtotal: ₱{total}**")
-                st.write(f"🔖 Points: {st.session_state.points} pts (100 pts = ₱1)")
-
-                max_discount = st.session_state.points // 100
-                use_points = st.checkbox(f"Apply points (max ₱{max_discount})", key="use_points")
-                discount = 0
-                if use_points and max_discount>0:
-                    discount = st.number_input("Discount amount (₱)", min_value=0, max_value=max_discount, value=0, key="discount_pesos")
-                final_total = max(0, total - discount)
-                st.write(f"**Total after discount: ₱{final_total}**")
-
-                pickup_date = st.date_input("Pickup date", value=date.today(), key="pickup_date")
-                pickup_time = st.time_input("Pickup time", value=datetime.now().time(), key="pickup_time")
-                payment_method = st.radio("Payment Method", ["Cash","Card","E-Wallet"], key="payment_method")
-
-                if st.button("Place Order", key="place_order"):
-                    order_id = f"ORD{random.randint(10000,99999)}"
-                    items_str = ", ".join([f"{k}x{v}" for k,v in st.session_state.cart.items()])
-                    pickup_dt = datetime.combine(pickup_date, pickup_time)
-                    details = f"user:{user['username']}|notes:pickup scheduled"
-                    try:
-                        save_receipt(order_id, items_str, final_total, payment_method, details, pickup_time=pickup_dt, status="Pending")
-                        st.session_state.points += int(final_total)
-                        if discount>0:
-                            st.session_state.points -= discount * 100
-                        st.success(f"✅ Order placed! Order ID: {order_id} | Total: ₱{final_total}")
-                        st.session_state.notifications.append(f"Order {order_id} placed for pickup {pickup_dt.strftime('%Y-%m-%d %H:%M')}")
-                        st.session_state.cart = {}
-                    except Exception as e:
-                        st.error(f"Error saving order: {e}")
-
-        # Feedback & notifications
-        with colB:
-            st.subheader("✍️ Give Feedback")
-            fb_item = st.selectbox("Select Item:", ["(select)"] + [i for cat in menu_data.values() for i in cat.keys()], key="fb_item")
-            rating = st.slider("Rate this item (1-5):", 1,5,3, key="fb_rating")
-            fb_text = st.text_area("Your Feedback:", key="fb_text")
-            if st.button("Submit Feedback", key="submit_fb"):
-                if fb_item != "(select)" and fb_text.strip():
-                    try:
-                        save_feedback(fb_item, fb_text.strip(), rating, username=user["username"])
-                        st.success("✅ Feedback submitted!")
-                    except Exception as e:
-                        st.error(f"Failed to save feedback: {e}")
+        elif choice == "Pending Orders":
+            st.subheader("📦 Pending Orders")
+            try:
+                receipts_df = load_receipts_df()
+                pending = receipts_df[receipts_df["status"]=="Pending"]
+                if not pending.empty:
+                    for _, row in pending.iterrows():
+                        st.write(f"Order {row['order_id']}: {row['items']} — ₱{row['total']}")
+                        if st.button(f"Mark Ready {row['order_id']}"):
+                            set_receipt_status(row['order_id'], "Ready for Pickup")
+                            st.success(f"Order {row['order_id']} marked ready")
+                            st.experimental_rerun()
                 else:
-                    st.warning("Choose an item and write feedback.")
+                    st.info("No pending orders.")
+            except Exception as e:
+                st.error(f"Could not load pending orders: {e}")
 
-            st.markdown("---")
-            st.subheader("🔔 Notifications")
-            if st.session_state.notifications:
-                for n in st.session_state.notifications[-5:]:
-                    st.info(n)
+        elif choice == "Add Menu":
+            st.subheader("➕ Add New Menu Item")
+            # Add menu logic here
+
+        elif choice == "AI Assistant":
+            st.subheader("🤖 AI Assistant")
+            q = st.text_input("Ask AI:", key="staff_ai")
+            if st.button("Ask AI", key="staff_ai_btn"):
+                st.info(run_ai(q, "Staff context"))
+
+        elif choice == "Feedback Review":
+            st.subheader("💬 Customer Feedback")
+            fb_df = load_feedbacks_df()
+            if not fb_df.empty:
+                st.dataframe(fb_df)
             else:
-                st.info("No notifications yet.")
+                st.info("No feedback yet.")
 
-        st.divider()
-        st.subheader("📦 Your Recent Orders")
-        try:
+        elif choice == "Sales Report":
+            st.subheader("📈 Sales Report")
             receipts_df = load_receipts_df()
             if not receipts_df.empty:
-                receipts_df["user"] = receipts_df["details"].fillna("").apply(lambda d: dict([p.split(":",1) for p in d.split("|") if ":" in p]).get("user",""))
-                my = receipts_df[receipts_df["user"]==user["username"]]
-                if not my.empty:
-                    st.dataframe(my[["order_id","items","total","payment_method","pickup_time","status","timestamp","details"]])
-                else:
-                    st.info("No previous orders found.")
+                st.dataframe(receipts_df)
+                st.bar_chart(receipts_df.groupby("payment_method")["total"].sum())
             else:
-                st.info("No receipts recorded yet.")
-        except Exception as e:
-            st.error(f"Could not load receipts: {e}")
-
-        if st.button("Log Out", key="logout_btn"):
-            st.session_state.page = "login"
-            st.session_state.user = None
-# -------------------------------
-# Staff Portal
-# -------------------------------
-elif user["role"] == "Staff":
-    st.success("🛠️ Staff Portal")
-
-    # --- Staff AI Assistant ---
-    st.subheader("🤖 Ask Staff AI Assistant")
-    staff_q = st.text_input("Ask Staff AI")
-    if st.button("Ask Staff AI"):
-        sales = load_sales().head(20).to_dict()
-        fb = load_feedbacks().head(20).to_dict()
-        st.info(run_ai(staff_q, f"Sales: {sales}\nFeedback: {fb}"))
-
-    # --- Manage Menu ---
-    st.subheader("📋 Manage Menu")
-    if "sold_out" not in st.session_state:
-        st.session_state.sold_out = set()
-
-    cat = st.selectbox("Category", list(menu_data.keys()))
-    item = st.text_input("Item")
-    price = st.number_input("Price", 0.0, 999.0, 10.0)
-
-    if st.button("Add/Update"):
-        if item:
-            menu_data[cat][item] = price
-            st.success(f"{item} updated in {cat}")
-
-    sel = st.selectbox("Select Item", ["(none)"] + [i for c in menu_data.values() for i in c.keys()])
-    if sel != "(none)":
-        if st.button("Sold Out"):
-            st.session_state.sold_out.add(sel)
-        if st.button("Available"):
-            st.session_state.sold_out.discard(sel)
-        if st.button("Remove"):
-            for c in menu_data:
-                menu_data[c].pop(sel, None)
-
-    # --- Feedbacks ---
-    st.subheader("💬 Feedbacks")
-    fb = load_feedbacks()
-    if not fb.empty:
-        st.dataframe(fb)
-    else:
-        st.info("No feedbacks yet.")
-
-    # --- Pending Orders ---
-    st.subheader("📦 Pending Orders")
-
-    def update_receipt_status(order_id, new_status):
-        try:
-            conn = get_connection()
-            cur = conn.cursor()
-
-            # Get existing details
-            cur.execute("SELECT details FROM receipts WHERE order_id = %s", (order_id,))
-            row = cur.fetchone()
-            if not row:
-                return False
-
-            details = row[0] or ""
-            parts = dict([p.split(":", 1) for p in details.split("|") if ":" in p])
-            parts["status"] = new_status  # update status only
-
-            # Rebuild details string
-            updated = "|".join([f"{k}:{v}" for k, v in parts.items()])
-
-            cur.execute("UPDATE receipts SET details = %s WHERE order_id = %s", (updated, order_id))
-            conn.commit()
-            cur.close()
-            conn.close()
-            return True
-        except Exception as e:
-            st.error(f"⚠️ DB update error: {e}")
-            return False
-
-    receipts_df = load_sales()
-    if not receipts_df.empty:
-        # Parse details into dict
-        receipts_df["parsed"] = receipts_df["details"].fillna("").apply(
-            lambda d: dict([p.split(":", 1) for p in d.split("|") if ":" in p])
-        )
-        receipts_df["status"] = receipts_df["parsed"].apply(lambda p: p.get("status", "unknown"))
-        receipts_df["pickup"] = receipts_df["parsed"].apply(lambda p: p.get("pickup", ""))
-        receipts_df["user"] = receipts_df["parsed"].apply(lambda p: p.get("user", ""))
-
-        pending = receipts_df[receipts_df["status"] == "pending"]
-
-        if not pending.empty:
-            for _, row in pending.iterrows():
-                st.write(
-                    f"**Order {row['order_id']}** — {row['items']} "
-                    f"| Pickup: {row['pickup']} | By: {row['user']}"
-                )
-                if st.button(f"Mark Ready — {row['order_id']}", key=f"ready_{row['order_id']}"):
-                    if update_receipt_status(row["order_id"], "ready"):
-                        st.success(f"✅ Order {row['order_id']} marked as Ready for Pickup")
-        else:
-            st.info("No pending orders found.")
-    else:
-        st.info("No receipts yet.")
-
-    # --- Sales Report ---
-    st.subheader("📊 All Sales")
-    rec = load_sales()
-    if not rec.empty:
-        rec["parsed"] = rec["details"].fillna("").apply(
-            lambda d: dict([p.split(":", 1) for p in d.split("|") if ":" in p])
-        )
-        rec["status"] = rec["parsed"].apply(lambda p: p.get("status", ""))
-        rec["pickup"] = rec["parsed"].apply(lambda p: p.get("pickup", ""))
-        rec["user"] = rec["parsed"].apply(lambda p: p.get("user", ""))
-        st.dataframe(rec[["order_id", "items", "status", "pickup", "user", "total"]])
-    else:
-        st.info("No sales yet.")
-
+                st.info("No sales yet.")
     # --- Logout ---
     if st.button("Log Out"):
         st.session_state.page = "login"
         st.session_state.user = None
+

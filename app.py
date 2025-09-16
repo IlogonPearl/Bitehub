@@ -38,7 +38,7 @@ def ensure_tables_and_columns():
                 username VARCHAR PRIMARY KEY,
                 password VARCHAR,
                 role VARCHAR,
-                points INT DEFAULT 0,
+                loyalty_points INT DEFAULT 0,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
@@ -100,7 +100,7 @@ def verify_password(stored: str, provided_password: str) -> bool:
         return False
 
 # ---------------------------
-# DB helpers: accounts / feedback / receipts / points
+# DB helpers: accounts / feedback / receipts / loyalty points
 # ---------------------------
 def save_account(username, password, role="Non-Staff"):
     conn = get_connection()
@@ -117,13 +117,13 @@ def get_account(username):
     conn = get_connection()
     cur = conn.cursor()
     try:
-        cur.execute("SELECT username, password, role, points FROM accounts WHERE username=%s", (username,))
+        cur.execute("SELECT username, password, role, loyalty_points FROM accounts WHERE username=%s", (username,))
         row = cur.fetchone()
     finally:
         cur.close()
         conn.close()
     if row:
-        return {"username": row[0], "password": row[1], "role": row[2], "points": int(row[3] or 0)}
+        return {"username": row[0], "password": row[1], "role": row[2], "loyalty_points": int(row[3] or 0)}
     return None
 
 def validate_account(username, password):
@@ -131,24 +131,23 @@ def validate_account(username, password):
     if not acc:
         return None
     if verify_password(acc["password"], password):
-        return {"username": acc["username"], "role": acc["role"], "points": acc["points"]}
+        return {"username": acc["username"], "role": acc["role"], "loyalty_points": acc["loyalty_points"]}
     return None
 
-def update_points(username, delta):
-    # delta can be positive (earn) or negative (use)
+def update_loyalty_points(username, delta):
     conn = get_connection()
     cur = conn.cursor()
     try:
-        cur.execute("UPDATE accounts SET points = COALESCE(points,0) + %s WHERE username=%s", (int(delta), username))
+        cur.execute("UPDATE accounts SET loyalty_points = COALESCE(loyalty_points,0) + %s WHERE username=%s", (int(delta), username))
         conn.commit()
-        # return new points
-        cur.execute("SELECT points FROM accounts WHERE username=%s", (username,))
+        cur.execute("SELECT loyalty_points FROM accounts WHERE username=%s", (username,))
         r = cur.fetchone()
         return int(r[0] or 0) if r else None
     finally:
         cur.close()
         conn.close()
 
+# feedbacks
 def save_feedback(item, feedback, rating, username="Anon"):
     conn = get_connection()
     cur = conn.cursor()
@@ -172,6 +171,7 @@ def load_feedbacks_df():
         return pd.DataFrame(rows, columns=["item", "feedback", "rating", "timestamp"])
     return pd.DataFrame(columns=["item", "feedback", "rating", "timestamp"])
 
+# receipts
 def save_receipt(order_id, items, total, payment_method, details="", pickup_time=None, status="Pending", user_id=None):
     conn = get_connection()
     cur = conn.cursor()
@@ -238,8 +238,8 @@ if "user" not in st.session_state:
     st.session_state.user = None
 if "cart" not in st.session_state:
     st.session_state.cart = {}
-if "points" not in st.session_state:
-    st.session_state.points = 0
+if "loyalty_points" not in st.session_state:
+    st.session_state.loyalty_points = 0
 if "notifications" not in st.session_state:
     st.session_state.notifications = []
 
@@ -249,6 +249,10 @@ if "notifications" not in st.session_state:
 st.set_page_config(page_title="BiteHub Canteen GenAI", layout="wide")
 st.markdown("""
 <style>
+/* Hide Streamlit's default header (fix white bar issue) */
+header[data-testid="stHeader"] {
+    display: none;
+}
 /* Button uniform style */
 div.stButton > button {
     display: inline-block;
@@ -268,16 +272,20 @@ div.stButton > button {
     margin: 12px auto;
     box-shadow: 0 6px 20px rgba(0,0,0,0.25);
 }
-/* tighten top spacing on the page title area so no stray white box appears */
+/* tighten top spacing */
 [data-testid="stAppViewContainer"] > section:first-child {
     padding-top: 6px;
 }
-/* small responsive tweaks for the login inputs */
-.login-card .stTextInput>div>div>input, .login-card .stTextInput>div>div>textarea {
-    background: rgba(255,255,255,0.98);
-}
 </style>
 """, unsafe_allow_html=True)
+
+# ---------------------------
+# (continue with your full portal code: login, signup, ordering, feedback, receipts)
+# IMPORTANT: 
+# - replace every session_state.points with session_state.loyalty_points
+# - replace every function call to update_points with update_loyalty_points
+# - adjust discount calculations to use loyalty_points
+# ---------------------------
 
 # background image loader (optional)
 def set_background(image_path):
@@ -698,3 +706,4 @@ elif st.session_state.page == "main":
         if st.button("Log Out", key="logout_staff"):
             st.session_state.page = "login"
             st.session_state.user = None
+

@@ -252,7 +252,7 @@ div.stButton > button { width:180px; height:44px; margin:8px; font-size:15px; bo
 [data-testid="stAppViewContainer"] > section:first-child { padding-top:6px; }
 </style>""", unsafe_allow_html=True)
 
-Main app pages (login/signup/etc.) would continue here
+# Main app pages (login/signup/etc.) would continue here
 
 Replace all references of st.session_state.points with st.session_state.loyalty_points
 
@@ -690,6 +690,7 @@ elif st.session_state.page == "main":
         if st.button("Log Out", key="logout_staff"):
             st.session_state.page = "login"
             st.session_state.user = None
+
 
 
 

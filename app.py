@@ -492,18 +492,23 @@ elif user["role"] == "Staff":
     st.subheader("🤖 Ask Staff AI Assistant")
     staff_q = st.text_input("Ask Staff AI")
     if st.button("Ask Staff AI"):
-        sales = load_receipts_df().head(20).to_dict()
-        fb = load_feedbacks_df().head(20).to_dict()
+        sales = load_sales().head(20).to_dict()
+        fb = load_feedbacks().head(20).to_dict()
         st.info(run_ai(staff_q, f"Sales: {sales}\nFeedback: {fb}"))
 
     # --- Manage Menu ---
     st.subheader("📋 Manage Menu")
+    if "sold_out" not in st.session_state:
+        st.session_state.sold_out = set()
+
     cat = st.selectbox("Category", list(menu_data.keys()))
     item = st.text_input("Item")
     price = st.number_input("Price", 0.0, 999.0, 10.0)
+
     if st.button("Add/Update"):
-        menu_data[cat][item] = price
-        st.success(f"{item} updated in {cat}")
+        if item:
+            menu_data[cat][item] = price
+            st.success(f"{item} updated in {cat}")
 
     sel = st.selectbox("Select Item", ["(none)"] + [i for c in menu_data.values() for i in c.keys()])
     if sel != "(none)":
@@ -517,51 +522,81 @@ elif user["role"] == "Staff":
 
     # --- Feedbacks ---
     st.subheader("💬 Feedbacks")
-    fb = load_feedbacks_df()
-    st.dataframe(fb)
+    fb = load_feedbacks()
+    if not fb.empty:
+        st.dataframe(fb)
+    else:
+        st.info("No feedbacks yet.")
 
     # --- Pending Orders ---
     st.subheader("📦 Pending Orders")
-    try:
-        receipts_df = load_receipts_df()
 
-        if not receipts_df.empty:
-            receipts_df["parsed"] = receipts_df["details"].fillna("").apply(
-                lambda d: dict([p.split(":", 1) for p in d.split("|") if ":" in p])
-            )
-            receipts_df["user"] = receipts_df["parsed"].apply(lambda p: p.get("user", ""))
-            receipts_df["status"] = receipts_df["parsed"].apply(lambda p: p.get("status", "unknown")).str.lower()
-            receipts_df["pickup"] = receipts_df["parsed"].apply(lambda p: p.get("pickup", ""))
+    def update_receipt_status(order_id, new_status):
+        try:
+            conn = get_connection()
+            cur = conn.cursor()
 
-            # Debug block
-            with st.expander("🔎 Debug: All Orders Data"):
-                st.dataframe(receipts_df[["order_id", "items", "status", "pickup", "user"]])
+            # Get existing details
+            cur.execute("SELECT details FROM receipts WHERE order_id = %s", (order_id,))
+            row = cur.fetchone()
+            if not row:
+                return False
 
-            # Filter pending
-            pending = receipts_df[receipts_df["status"] == "pending"]
+            details = row[0] or ""
+            parts = dict([p.split(":", 1) for p in details.split("|") if ":" in p])
+            parts["status"] = new_status  # update status only
 
-            if not pending.empty:
-                for i, row in pending.iterrows():
-                    st.write(
-                        f"**Order {row['order_id']}** — {row['items']} | Pickup: {row['pickup']} | By {row['user']}"
-                    )
-                    if st.button(f"Mark Ready — {row['order_id']}", key=f"ready_{row['order_id']}"):
-                        success = update_receipt_status(row["order_id"], "ready for pickup")  # ✅ fixed function name
-                        if success:
-                            st.success(f"✅ Order {row['order_id']} marked as Ready for Pickup")
-                        else:
-                            st.error("⚠️ Could not update order status.")
-            else:
-                st.info("No pending orders found.")
+            # Rebuild details string
+            updated = "|".join([f"{k}:{v}" for k, v in parts.items()])
+
+            cur.execute("UPDATE receipts SET details = %s WHERE order_id = %s", (updated, order_id))
+            conn.commit()
+            cur.close()
+            conn.close()
+            return True
+        except Exception as e:
+            st.error(f"⚠️ DB update error: {e}")
+            return False
+
+    receipts_df = load_sales()
+    if not receipts_df.empty:
+        # Parse details into dict
+        receipts_df["parsed"] = receipts_df["details"].fillna("").apply(
+            lambda d: dict([p.split(":", 1) for p in d.split("|") if ":" in p])
+        )
+        receipts_df["status"] = receipts_df["parsed"].apply(lambda p: p.get("status", "unknown"))
+        receipts_df["pickup"] = receipts_df["parsed"].apply(lambda p: p.get("pickup", ""))
+        receipts_df["user"] = receipts_df["parsed"].apply(lambda p: p.get("user", ""))
+
+        pending = receipts_df[receipts_df["status"] == "pending"]
+
+        if not pending.empty:
+            for _, row in pending.iterrows():
+                st.write(
+                    f"**Order {row['order_id']}** — {row['items']} "
+                    f"| Pickup: {row['pickup']} | By: {row['user']}"
+                )
+                if st.button(f"Mark Ready — {row['order_id']}", key=f"ready_{row['order_id']}"):
+                    if update_receipt_status(row["order_id"], "ready"):
+                        st.success(f"✅ Order {row['order_id']} marked as Ready for Pickup")
         else:
-            st.info("No receipts yet.")
-    except Exception as e:
-        st.error(f"Could not load pending orders: {e}")
+            st.info("No pending orders found.")
+    else:
+        st.info("No receipts yet.")
 
     # --- Sales Report ---
     st.subheader("📊 All Sales")
-    rec = load_receipts_df()
-    st.dataframe(rec)
+    rec = load_sales()
+    if not rec.empty:
+        rec["parsed"] = rec["details"].fillna("").apply(
+            lambda d: dict([p.split(":", 1) for p in d.split("|") if ":" in p])
+        )
+        rec["status"] = rec["parsed"].apply(lambda p: p.get("status", ""))
+        rec["pickup"] = rec["parsed"].apply(lambda p: p.get("pickup", ""))
+        rec["user"] = rec["parsed"].apply(lambda p: p.get("user", ""))
+        st.dataframe(rec[["order_id", "items", "status", "pickup", "user", "total"]])
+    else:
+        st.info("No sales yet.")
 
     # --- Logout ---
     if st.button("Log Out"):

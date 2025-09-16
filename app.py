@@ -482,16 +482,59 @@ elif st.session_state.page == "main":
         if st.button("Log Out", key="logout_btn"):
             st.session_state.page = "login"
             st.session_state.user = None
-
-    # Staff portal
+# -------------------------------------------------
+    # Staff Portal
+    # -------------------------------------------------
     elif user["role"] == "Staff":
-        st.success("👨‍🍳 Staff Portal — Manage & Reports")
+        st.success("👨‍🍳 Staff Portal")
 
         st.subheader("🤖 Staff AI Assistant")
-        staff_q = st.text_input("Ask AI (suggestions based on feedback/sales):", key="staff_ai")
-        if st.button("Ask Staff AI", key="staff_ai_btn"):
-            sales_df = load_receipts_df()
-            fb_df = load_feedbacks_df()
-            extra_context = f"Sales: {sales_df.head(50).to_dict() if not sales_df.empty else 'No sales'}\nFeedback: {fb_df.head(50).to_dict() if not fb_df.empty else 'No feedback'}"
-            with st.spinner("Running AI..."):
-                st.info(run_ai(staff_
+        staff_q = st.text_input("Ask Staff AI")
+        if st.button("Ask Staff AI"):
+            sales = load_receipts_df().head(20).to_dict()
+            fb = load_feedbacks_df().head(20).to_dict()
+            st.info(run_ai(staff_q, f"Sales: {sales}\nFeedback: {fb}"))
+
+        st.subheader("📋 Manage Menu")
+        cat = st.selectbox("Category", list(menu_data.keys()))
+        item = st.text_input("Item")
+        price = st.number_input("Price", 0.0, 999.0, 10.0)
+        if st.button("Add/Update"):
+            menu_data[cat][item] = price
+            st.success(f"{item} updated in {cat}")
+
+        sel = st.selectbox("Select Item", ["(none)"] + [i for c in menu_data.values() for i in c.keys()])
+        if sel != "(none)":
+            if st.button("Sold Out"):
+                st.session_state.sold_out.add(sel)
+            if st.button("Available"):
+                st.session_state.sold_out.discard(sel)
+            if st.button("Remove"):
+                for c in menu_data:
+                    menu_data[c].pop(sel, None)
+
+        st.subheader("📝 Feedbacks")
+        fb = load_feedbacks_df()
+        st.dataframe(fb)
+
+        st.subheader("📦 Pending Orders")
+        rec = load_receipts_df()
+        if not rec.empty:
+            pending = rec[rec["details"].fillna("").str.contains("status:pending")]
+            if not pending.empty:
+                for _, row in pending.iterrows():
+                    st.write(f"📌 Order {row['order_id']} — {row['items']} — {row['details']}")
+                    if st.button(f"Mark Ready {row['order_id']}"):
+                        update_receipt_status(row['order_id'], "ready for pickup")
+                        st.success(f"Order {row['order_id']} marked as ready!")
+            else:
+                st.info("No pending orders.")
+        else:
+            st.info("No orders found.")
+
+        st.subheader("📊 All Sales")
+        st.dataframe(rec)
+
+        if st.button("Log Out"):
+            st.session_state.page = "login"
+            st.session_state.user = None

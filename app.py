@@ -372,7 +372,7 @@ elif st.session_state.page == "main":
     # Non-Staff view
     if user["role"] == "Non-Staff":
         if user["username"] == "Guest":
-            st.warning("🔓 You're using Guest. Create an account and enjoy promotions like "Loyalty points, Surprise Promos")
+            st.warning("🔓 You're using Guest. Create an account and enjoy promotions like Loyalty points, Surprise Promos.")
 
         st.subheader("🤖 Canteen AI Assistant")
         q = st.text_input("Ask about menu, budget, feedback, or sales:", key="ai_query")
@@ -538,4 +538,5 @@ elif st.session_state.page == "main":
         if st.button("Log Out"):
             st.session_state.page = "login"
             st.session_state.user = None
+
 

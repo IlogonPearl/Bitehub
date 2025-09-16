@@ -663,7 +663,7 @@ elif st.session_state.page == "main":
                             if st.button(f"Mark Ready {row['order_id']}", key=f"ready_{row['order_id']}"):
                                 set_receipt_status(row['order_id'], "Ready for Pickup")
                                 st.success(f"Order {row['order_id']} marked ready")
-                                st.experimental_rerun()
+                                st.rerun()
                     else:
                         st.info("No pending orders.")
                 else:
@@ -734,3 +734,4 @@ elif st.session_state.page == "main":
         if st.button("Log Out", key="logout_staff"):
             st.session_state.page = "login"
             st.session_state.user = None
+

@@ -1,3 +1,4 @@
+# app.py - BiteHub (compiled) with Snowflake-safe schema upgrades (preserve data)
 import os
 import base64
 import streamlit as st
@@ -9,6 +10,7 @@ from datetime import datetime, date, time
 import matplotlib.pyplot as plt
 import hashlib
 import secrets
+import time as time_mod
 
 # ---------------------------
 # Helper: Snowflake connection
@@ -24,10 +26,82 @@ def get_connection():
     )
 
 # ---------------------------
+# Ensure tables & columns exist (safe, preserve data)
+# ---------------------------
+def ensure_tables_and_columns():
+    conn = get_connection()
+    cur = conn.cursor()
+    try:
+        # Create accounts table if not exists
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS accounts (
+                username VARCHAR PRIMARY KEY,
+                password VARCHAR,
+                role VARCHAR,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        # Create feedbacks table if not exists
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS feedbacks (
+                id INT AUTOINCREMENT PRIMARY KEY,
+                item VARCHAR,
+                feedback VARCHAR,
+                rating INT,
+                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        # Create receipts table if not exists (keep minimal columns; we'll add missing ones later)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS receipts (
+                id INT AUTOINCREMENT PRIMARY KEY,
+                order_id VARCHAR UNIQUE,
+                user_id VARCHAR,
+                items TEXT,
+                total FLOAT,
+                payment_method VARCHAR,
+                details TEXT,
+                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        # helper to check if column exists
+        def column_exists(table_name, column_name):
+            cur.execute(
+                """
+                SELECT COUNT(*) FROM information_schema.columns
+                WHERE table_catalog = %s AND table_schema = %s AND table_name = %s AND column_name = %s
+                """,
+                (st.secrets["SNOWFLAKE_DATABASE"], st.secrets["SNOWFLAKE_SCHEMA"], table_name.upper(), column_name.upper()),
+            )
+            cnt = cur.fetchone()[0]
+            return cnt > 0
+
+        # Add pickup_time column if missing
+        if not column_exists("receipts", "pickup_time"):
+            cur.execute("ALTER TABLE receipts ADD COLUMN pickup_time TIMESTAMP_NTZ")
+        # Add status column if missing (default 'Pending')
+        if not column_exists("receipts", "status"):
+            # Add column
+            cur.execute("ALTER TABLE receipts ADD COLUMN status VARCHAR")
+            # Set default pending for existing nulls
+            cur.execute("UPDATE receipts SET status='Pending' WHERE status IS NULL")
+    finally:
+        cur.close()
+        conn.commit()
+        conn.close()
+
+# Run the ensure step early (safe, idempotent)
+try:
+    ensure_tables_and_columns()
+except Exception as e:
+    # If DB creds missing in st.secrets or connection fails, show warning but keep app running for dev/testing
+    st.warning(f"Could not ensure DB schema (will continue in limited/local mode): {e}")
+
+# ---------------------------
 # Password hashing (PBKDF2)
 # ---------------------------
 def hash_password(password: str, salt: bytes | None = None) -> str:
-    # Returns hex string: salt + $ + hash
     if salt is None:
         salt = secrets.token_bytes(16)
     hashed = hashlib.pbkdf2_hmac("sha256", password.encode(), salt, 200_000)
@@ -49,21 +123,25 @@ def save_account(username, password, role="Non-Staff"):
     conn = get_connection()
     cur = conn.cursor()
     hashed = hash_password(password)
-    cur.execute(
-        "INSERT INTO accounts (username, password, role) VALUES (%s, %s, %s)",
-        (username, hashed, role),
-    )
-    conn.commit()
-    cur.close()
-    conn.close()
+    try:
+        cur.execute(
+            "INSERT INTO accounts (username, password, role) VALUES (%s, %s, %s)",
+            (username, hashed, role),
+        )
+        conn.commit()
+    finally:
+        cur.close()
+        conn.close()
 
 def get_account(username):
     conn = get_connection()
     cur = conn.cursor()
-    cur.execute("SELECT username, password, role FROM accounts WHERE username=%s", (username,))
-    row = cur.fetchone()
-    cur.close()
-    conn.close()
+    try:
+        cur.execute("SELECT username, password, role FROM accounts WHERE username=%s", (username,))
+        row = cur.fetchone()
+    finally:
+        cur.close()
+        conn.close()
     if row:
         return {"username": row[0], "password": row[1], "role": row[2]}
     return None
@@ -79,62 +157,64 @@ def validate_account(username, password):
 def save_feedback(item, feedback, rating, username="Anon"):
     conn = get_connection()
     cur = conn.cursor()
-    cur.execute(
-        "INSERT INTO feedbacks (item, feedback, rating) VALUES (%s, %s, %s)",
-        (item, f"{username}: {feedback}", rating),
-    )
-    conn.commit()
-    cur.close()
-    conn.close()
+    try:
+        cur.execute(
+            "INSERT INTO feedbacks (item, feedback, rating) VALUES (%s, %s, %s)",
+            (item, f"{username}: {feedback}", rating),
+        )
+        conn.commit()
+    finally:
+        cur.close()
+        conn.close()
 
 def load_feedbacks_df():
     conn = get_connection()
     cur = conn.cursor()
-    cur.execute("SELECT item, feedback, rating, timestamp FROM feedbacks ORDER BY timestamp DESC")
-    rows = cur.fetchall()
-    cur.close()
-    conn.close()
+    try:
+        cur.execute("SELECT item, feedback, rating, timestamp FROM feedbacks ORDER BY timestamp DESC")
+        rows = cur.fetchall()
+    finally:
+        cur.close()
+        conn.close()
     if rows:
         return pd.DataFrame(rows, columns=["item", "feedback", "rating", "timestamp"])
     return pd.DataFrame(columns=["item", "feedback", "rating", "timestamp"])
 
-def save_receipt(order_id, items, total, payment_method, details=""):
+def save_receipt(order_id, items, total, payment_method, details="", pickup_time=None, status="Pending"):
     conn = get_connection()
     cur = conn.cursor()
-    cur.execute(
-        "INSERT INTO receipts (order_id, items, total, payment_method, details) VALUES (%s, %s, %s, %s, %s)",
-        (order_id, items, total, payment_method, details),
-    )
-    conn.commit()
-    cur.close()
-    conn.close()
+    try:
+        cur.execute(
+            "INSERT INTO receipts (order_id, items, total, payment_method, details, pickup_time, status) VALUES (%s, %s, %s, %s, %s, %s, %s)",
+            (order_id, items, total, payment_method, details, pickup_time, status),
+        )
+        conn.commit()
+    finally:
+        cur.close()
+        conn.close()
 
 def load_receipts_df():
     conn = get_connection()
     cur = conn.cursor()
-    cur.execute("SELECT order_id, items, total, payment_method, details, timestamp FROM receipts ORDER BY timestamp DESC")
-    rows = cur.fetchall()
-    cur.close()
-    conn.close()
+    try:
+        cur.execute("SELECT order_id, items, total, payment_method, details, pickup_time, status, timestamp FROM receipts ORDER BY timestamp DESC")
+        rows = cur.fetchall()
+    finally:
+        cur.close()
+        conn.close()
     if rows:
-        return pd.DataFrame(rows, columns=["order_id", "items", "total", "payment_method", "details", "timestamp"])
-    return pd.DataFrame(columns=["order_id", "items", "total", "payment_method", "details", "timestamp"])
+        return pd.DataFrame(rows, columns=["order_id", "items", "total", "payment_method", "details", "pickup_time", "status", "timestamp"])
+    return pd.DataFrame(columns=["order_id", "items", "total", "payment_method", "details", "pickup_time", "status", "timestamp"])
 
-def update_receipt_status(order_id, new_status):
-    df = load_receipts_df()
-    row = df[df["order_id"] == order_id]
-    if row.empty:
-        return False
-    details = row.iloc[0]["details"] or ""
-    parts = dict([p.split(":", 1) for p in details.split("|") if ":" in p])
-    parts["status"] = new_status
-    new_details = "|".join([f"{k}:{v}" for k, v in parts.items()])
+def set_receipt_status(order_id, new_status):
     conn = get_connection()
     cur = conn.cursor()
-    cur.execute("UPDATE receipts SET details=%s WHERE order_id=%s", (new_details, order_id))
-    conn.commit()
-    cur.close()
-    conn.close()
+    try:
+        cur.execute("UPDATE receipts SET status=%s WHERE order_id=%s", (new_status, order_id))
+        conn.commit()
+    finally:
+        cur.close()
+        conn.close()
     return True
 
 # ---------------------------
@@ -273,7 +353,7 @@ elif st.session_state.page == "main":
     user = st.session_state.user or {"username": "Guest", "role": "Non-Staff"}
     st.title(f"🏫 Welcome {user['username']} to BiteHub")
 
-    # AI assistant helper
+    # AI helper
     def run_ai(question, extra_context=""):
         if not question:
             return "Please ask something."
@@ -346,15 +426,15 @@ elif st.session_state.page == "main":
                 if st.button("Place Order", key="place_order"):
                     order_id = f"ORD{random.randint(10000,99999)}"
                     items_str = ", ".join([f"{k}x{v}" for k,v in st.session_state.cart.items()])
-                    pickup_dt = f"{pickup_date.isoformat()} {pickup_time.strftime('%H:%M')}"
-                    details = f"user:{user['username']}|pickup:{pickup_dt}|status:pending"
+                    pickup_dt = datetime.combine(pickup_date, pickup_time)
+                    details = f"user:{user['username']}|notes:pickup scheduled"
                     try:
-                        save_receipt(order_id, items_str, final_total, payment_method, details)
+                        save_receipt(order_id, items_str, final_total, payment_method, details, pickup_time=pickup_dt, status="Pending")
                         st.session_state.points += int(final_total)
                         if discount>0:
                             st.session_state.points -= discount * 100
                         st.success(f"✅ Order placed! Order ID: {order_id} | Total: ₱{final_total}")
-                        st.session_state.notifications.append(f"Order {order_id} placed for pickup {pickup_dt}")
+                        st.session_state.notifications.append(f"Order {order_id} placed for pickup {pickup_dt.strftime('%Y-%m-%d %H:%M')}")
                         st.session_state.cart = {}
                     except Exception as e:
                         st.error(f"Error saving order: {e}")
@@ -391,7 +471,7 @@ elif st.session_state.page == "main":
                 receipts_df["user"] = receipts_df["details"].fillna("").apply(lambda d: dict([p.split(":",1) for p in d.split("|") if ":" in p]).get("user",""))
                 my = receipts_df[receipts_df["user"]==user["username"]]
                 if not my.empty:
-                    st.dataframe(my[["order_id","items","total","payment_method","timestamp","details"]])
+                    st.dataframe(my[["order_id","items","total","payment_method","pickup_time","status","timestamp","details"]])
                 else:
                     st.info("No previous orders found.")
             else:
@@ -414,52 +494,4 @@ elif st.session_state.page == "main":
             fb_df = load_feedbacks_df()
             extra_context = f"Sales: {sales_df.head(50).to_dict() if not sales_df.empty else 'No sales'}\nFeedback: {fb_df.head(50).to_dict() if not fb_df.empty else 'No feedback'}"
             with st.spinner("Running AI..."):
-                st.info(run_ai(staff_q, extra_context=extra_context))
-
-        st.divider()
-        st.subheader("📋 Manage Menu")
-        m_cat = st.selectbox("Category to edit/add:", list(menu_data.keys()), key="manage_cat")
-        m_item = st.text_input("Item name", key="manage_item")
-        m_price = st.number_input("Price", min_value=0.0, value=10.0, key="manage_price")
-        if st.button("Add / Update Item", key="manage_add"):
-            if m_item:
-                menu_data.setdefault(m_cat, {})[m_item] = m_price
-                st.success(f"Added/Updated {m_item} in {m_cat} at ₱{m_price}")
-
-        st.markdown("---")
-        st.subheader("📝 Feedbacks")
-        fb_df = load_feedbacks_df()
-        if not fb_df.empty:
-            st.dataframe(fb_df)
-        else:
-            st.info("No feedbacks yet.")
-
-        st.subheader("📊 Sales Report")
-        rec = load_receipts_df()
-        if not rec.empty:
-            st.dataframe(rec.head(200))
-            # quick item frequency
-            item_counts = {}
-            for r in rec["items"].dropna():
-                for part in r.split(","):
-                    part = part.strip()
-                    if "x" in part:
-                        name, qty = part.split("x",1)
-                        name = name.strip()
-                        try:
-                            qty = int(qty)
-                        except:
-                            qty = 1
-                    else:
-                        name = part
-                        qty = 1
-                    item_counts[name] = item_counts.get(name,0) + qty
-            if item_counts:
-                freq_df = pd.DataFrame(item_counts.items(), columns=["item","qty"]).sort_values("qty", ascending=False)
-                st.bar_chart(freq_df.set_index("item")["qty"])
-        else:
-            st.info("No sales recorded yet.")
-
-        if st.button("Log Out", key="staff_logout"):
-            st.session_state.page = "login"
-            st.session_state.user = None
+                st.info(run_ai(staff_

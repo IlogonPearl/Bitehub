@@ -4,7 +4,8 @@ import streamlit as st
 import pandas as pd
 import snowflake.connector 
 from groq import Groq 
-import random from datetime import datetime, date, time 
+import random 
+from datetime import datetime, date, time 
 import matplotlib.pyplot as plt 
 import hashlib 
 import secrets 
@@ -542,6 +543,7 @@ elif st.session_state.page == "main":
         if st.button("Log Out", key="logout_staff"):
             st.session_state.page = "login"
             st.session_state.user = None
+
 
 
 

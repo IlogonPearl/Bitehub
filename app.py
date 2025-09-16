@@ -516,37 +516,39 @@ elif user["role"] == "Staff":
 
     # ✅ Only staff can see pending orders
     st.subheader("📦 Pending Orders")
-    try:
-        receipts_df = load_receipts_df()
-        if not receipts_df.empty:
-            receipts_df["parsed"] = receipts_df["details"].fillna("").apply(
-                lambda d: dict([p.split(":", 1) for p in d.split("|") if ":" in p])
-            )
-            receipts_df["user"] = receipts_df["parsed"].apply(lambda p: p.get("user", ""))
-            receipts_df["status"] = receipts_df["parsed"].apply(lambda p: p.get("status", "unknown"))
-            receipts_df["pickup"] = receipts_df["parsed"].apply(lambda p: p.get("pickup", ""))
+try:
+    receipts_df = load_receipts_df()
 
-            pending = receipts_df[receipts_df["status"] == "pending"]
+    if not receipts_df.empty:
+        # Parse details into dict
+        receipts_df["parsed"] = receipts_df["details"].fillna("").apply(
+            lambda d: dict([p.split(":", 1) for p in d.split("|") if ":" in p])
+        )
+        receipts_df["user"] = receipts_df["parsed"].apply(lambda p: p.get("user", ""))
+        receipts_df["status"] = receipts_df["parsed"].apply(lambda p: p.get("status", "unknown")).str.lower()
+        receipts_df["pickup"] = receipts_df["parsed"].apply(lambda p: p.get("pickup", ""))
 
-            if not pending.empty:
-                for i, row in pending.iterrows():
-                    st.write(f"**Order {row['order_id']}** — {row['items']} | Pickup: {row['pickup']} | By {row['user']}")
-                    if st.button(f"Mark Ready — {row['order_id']}", key=f"ready_{row['order_id']}"):
-                        success = update_receipt_status(row["order_id"], "ready for pickup")
-                        if success:
-                            st.success(f"✅ Order {row['order_id']} marked as Ready for Pickup")
-                        else:
-                            st.error("⚠️ Could not update order status.")
-            else:
-                st.info("No pending orders.")
+        # DEBUG: show all orders so staff can see statuses
+        with st.expander("🔎 Debug: All Orders Data"):
+            st.dataframe(receipts_df[["order_id", "items", "status", "pickup", "user"]])
+
+        # Filter pending
+        pending = receipts_df[receipts_df["status"] == "pending"]
+
+        if not pending.empty:
+            for i, row in pending.iterrows():
+                st.write(
+                    f"**Order {row['order_id']}** — {row['items']} | Pickup: {row['pickup']} | By {row['user']}"
+                )
+                if st.button(f"Mark Ready — {row['order_id']}", key=f"ready_{row['order_id']}"):
+                    success = update_receipt_status(row["order_id"], "ready for pickup")
+                    if success:
+                        st.success(f"✅ Order {row['order_id']} marked as Ready for Pickup")
+                    else:
+                        st.error("⚠️ Could not update order status.")
         else:
-            st.info("No receipts yet.")
-    except Exception as e:
-        st.error(f"Could not load pending orders: {e}")
-
-    st.subheader("📊 All Sales")
-    st.dataframe(load_receipts_df())
-
-    if st.button("Log Out"):
-        st.session_state.page = "login"
-        st.session_state.user = None
+            st.info("No pending orders found.")
+    else:
+        st.info("No receipts yet.")
+except Exception as e:
+    st.error(f"Could not load pending orders: {e}")

@@ -8,19 +8,14 @@ import random
 from datetime import datetime, date, time 
 import matplotlib.pyplot as plt
 
--------------------------------------------------
 
 Helper: Snowflake connection (uses st.secrets)
 
--------------------------------------------------
 
 def get_connection(): return snowflake.connector.connect( user=st.secrets["SNOWFLAKE_USER"], password=st.secrets["SNOWFLAKE_PASSWORD"], account=st.secrets["SNOWFLAKE_ACCOUNT"], warehouse=st.secrets["SNOWFLAKE_WAREHOUSE"], database=st.secrets["SNOWFLAKE_DATABASE"], schema=st.secrets["SNOWFLAKE_SCHEMA"], )
 
--------------------------------------------------
-
 Save / Load helpers (feedback + receipts)
 
--------------------------------------------------
 
 def save_feedback(item, feedback, rating, username="Anon"): conn = get_connection() cur = conn.cursor() cur.execute( "INSERT INTO feedbacks (item, feedback, rating) VALUES (%s, %s, %s)", (item, f"{username}: {feedback}", rating), ) conn.commit() cur.close() conn.close()
 
@@ -32,35 +27,24 @@ def load_receipts_df(): conn = get_connection() cur = conn.cursor() cur.execute(
 
 def update_receipt_status(order_id, new_status): df = load_receipts_df() row = df[df["order_id"]==order_id] if row.empty: return False details = row.iloc[0]["details"] or "" parts = dict([p.split(":",1) for p in details.split("|") if ":" in p]) parts["status"] = new_status new_details = "|".join([f"{k}:{v}" for k,v in parts.items()]) conn = get_connection() cur = conn.cursor() cur.execute("UPDATE receipts SET details=%s WHERE order_id=%s", (new_details, order_id)) conn.commit() cur.close() conn.close() return True
 
--------------------------------------------------
 
 Menu data (in-memory)
 
--------------------------------------------------
 
 menu_data = { "Breakfast": {"Tapsilog": 70, "Longsilog": 65, "Hotdog Meal": 50, "Omelette": 45}, "Lunch": {"Chicken Adobo": 90, "Pork Sinigang": 100, "Beef Caldereta": 120, "Rice": 15}, "Snack": {"Burger": 50, "Fries": 30, "Siomai Rice": 60, "Spaghetti": 45}, "Drinks": {"Soda": 20, "Iced Tea": 25, "Bottled Water": 15, "Coffee": 30}, "Dessert": {"Halo-Halo": 65, "Leche Flan": 40, "Ice Cream": 35}, "Dinner": {"Grilled Chicken": 95, "Sisig": 110, "Fried Bangus": 85, "Rice": 15}, } if "sold_out" not in st.session_state: st.session_state.sold_out = set()
 
--------------------------------------------------
-
 Groq client (AI)
-
--------------------------------------------------
 
 client = Groq(api_key=st.secrets["GROQ_API_KEY"])
 
--------------------------------------------------
 
 Session setup
 
--------------------------------------------------
 
-if "page" not in st.session_state: st.session_state.page = "login" if "user" not in st.session_state: st.session_state.user = None if "cart" not in st.session_state: st.session_state.cart = {} if "points" not in st.session_state: st.session_state.points = 0 if "notifications" not in st.session_state: st.session_state.notifications = []
-
--------------------------------------------------
+if "page" not in st.session_state: st.session_state.page = "login" if "user" not in st.session_state: st.session_state.user = None if "cart" not in st.session_state: st.session_state.cart = {} if "points" not in st.session_state: st.session_state.points = 0 if "notifications" not in st.session_state: st.session_state.notifications = [
 
 CSS + Background
 
--------------------------------------------------
 
 st.set_page_config(page_title="BiteHub Canteen GenAI", layout="wide")
 
@@ -264,6 +248,7 @@ elif user["role"] == "Staff":
     if st.button("Log Out"):
         st.session_state.page = "login"
         st.session_state.user = None
+
 
 
 

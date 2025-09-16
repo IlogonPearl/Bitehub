@@ -11,41 +11,41 @@ import hashlib
 import secrets 
 import re
 
----------------------------
+#---------------------------
 
-Snowflake connection helper
+#Snowflake connection helper
 
----------------------------
+#---------------------------
 
 def get_connection(): return snowflake.connector.connect( user=st.secrets["SNOWFLAKE_USER"], password=st.secrets["SNOWFLAKE_PASSWORD"], account=st.secrets["SNOWFLAKE_ACCOUNT"], warehouse=st.secrets["SNOWFLAKE_WAREHOUSE"], database=st.secrets["SNOWFLAKE_DATABASE"], schema=st.secrets["SNOWFLAKE_SCHEMA"], )
 
----------------------------
+#---------------------------
 
-Ensure tables & columns exist
+#Ensure tables & columns exist
 
----------------------------
+#---------------------------
 
 def ensure_tables_and_columns(): try: conn = get_connection() cur = conn.cursor() # accounts cur.execute(""" CREATE TABLE IF NOT EXISTS accounts ( username VARCHAR PRIMARY KEY, password VARCHAR, role VARCHAR, loyalty_points INT DEFAULT 0, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ) """) # feedbacks cur.execute(""" CREATE TABLE IF NOT EXISTS feedbacks ( id INT AUTOINCREMENT PRIMARY KEY, item VARCHAR, feedback VARCHAR, rating INT, timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP ) """) # receipts cur.execute(""" CREATE TABLE IF NOT EXISTS receipts ( id INT AUTOINCREMENT PRIMARY KEY, order_id VARCHAR UNIQUE, user_id VARCHAR, items TEXT, total FLOAT, payment_method VARCHAR, details TEXT, pickup_time TIMESTAMP_NTZ, status VARCHAR, timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP ) """) finally: try: cur.close() conn.commit() conn.close() except Exception: pass
 
-Run schema ensure
+#Run schema ensure
 
 try: ensure_tables_and_columns() except Exception as e: st.warning(f"Could not ensure DB schema: {e}")
 
----------------------------
+#---------------------------
 
-Password utilities
+#Password utilities
 
----------------------------
+#---------------------------
 
 def hash_password(password: str, salt: bytes | None = None) -> str: if salt is None: salt = secrets.token_bytes(16) hashed = hashlib.pbkdf2_hmac("sha256", password.encode(), salt, 200_000) return salt.hex() + "$" + hashed.hex()
 
 def verify_password(stored: str, provided_password: str) -> bool: try: salt_hex, hash_hex = stored.split("$", 1) salt = bytes.fromhex(salt_hex) expected = hashlib.pbkdf2_hmac("sha256", provided_password.encode(), salt, 200_000) return expected.hex() == hash_hex except Exception: return False
 
----------------------------
+#---------------------------
 
-DB helpers
+#DB helpers
 
----------------------------
+#---------------------------
 
 def save_account(username, password, role="Non-Staff"): conn = get_connection() cur = conn.cursor() hashed = hash_password(password) try: cur.execute("INSERT INTO accounts (username, password, role) VALUES (%s, %s, %s)", (username, hashed, role)) conn.commit() finally: cur.close() conn.close()
 
@@ -543,6 +543,7 @@ elif st.session_state.page == "main":
         if st.button("Log Out", key="logout_staff"):
             st.session_state.page = "login"
             st.session_state.user = None
+
 
 
 

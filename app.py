@@ -1,20 +1,27 @@
-import os 
-import base64 
-import streamlit as st 
+# app.py - BiteHub (compiled, ready-to-paste)
+import os
+import base64
+import streamlit as st
 import pandas as pd
-import snowflake.connector 
-from groq import Groq 
-import random 
-from datetime import datetime, date, time 
-import matplotlib.pyplot as plt 
-import hashlib 
-import secrets 
+import snowflake.connector
+from groq import Groq
+import random
+from datetime import datetime, date, time
+import matplotlib.pyplot as plt
+import hashlib
+import secrets
 import re
+
+# ---------------------------
+# Page config (do this early)
+# ---------------------------
+st.set_page_config(page_title="BiteHub Canteen GenAI", layout="wide")
 
 # ---------------------------
 # Snowflake connection helper
 # ---------------------------
 def get_connection():
+    # Make sure st.secrets has your SNOWFLAKE_* values
     return snowflake.connector.connect(
         user=st.secrets["SNOWFLAKE_USER"],
         password=st.secrets["SNOWFLAKE_PASSWORD"],
@@ -25,13 +32,14 @@ def get_connection():
     )
 
 # ---------------------------
-# Ensure tables & columns exist
+# Ensure tables & columns exist (safe, preserve data)
 # ---------------------------
 def ensure_tables_and_columns():
     try:
         conn = get_connection()
         cur = conn.cursor()
-        # accounts
+
+        # Create accounts table if missing (with loyalty_points)
         cur.execute("""
             CREATE TABLE IF NOT EXISTS accounts (
                 username VARCHAR PRIMARY KEY,
@@ -41,7 +49,8 @@ def ensure_tables_and_columns():
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
-        # feedbacks
+
+        # Create feedbacks table
         cur.execute("""
             CREATE TABLE IF NOT EXISTS feedbacks (
                 id INT AUTOINCREMENT PRIMARY KEY,
@@ -51,7 +60,8 @@ def ensure_tables_and_columns():
                 timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
-        # receipts
+
+        # Create receipts table (minimal, will add columns if missing)
         cur.execute("""
             CREATE TABLE IF NOT EXISTS receipts (
                 id INT AUTOINCREMENT PRIMARY KEY,
@@ -66,6 +76,45 @@ def ensure_tables_and_columns():
                 timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
+
+        # Helper to check if a column exists (Snowflake information_schema)
+        def column_exists(table_name: str, column_name: str) -> bool:
+            try:
+                cur.execute(
+                    """
+                    SELECT COUNT(*) FROM information_schema.columns
+                    WHERE table_catalog = %s AND table_schema = %s AND table_name = %s AND column_name = %s
+                    """,
+                    (st.secrets["SNOWFLAKE_DATABASE"], st.secrets["SNOWFLAKE_SCHEMA"], table_name.upper(), column_name.upper())
+                )
+                cnt = cur.fetchone()[0]
+                return cnt > 0
+            except Exception:
+                # if we can't query information_schema, be conservative and return False
+                return False
+
+        # Ensure loyalty_points column present (for older DBs that had 'points' or none)
+        if not column_exists("accounts", "loyalty_points"):
+            try:
+                cur.execute("ALTER TABLE accounts ADD COLUMN loyalty_points INT DEFAULT 0")
+            except Exception:
+                # ignore if alter fails (e.g., privileges)
+                pass
+
+        # Ensure receipts columns (status, pickup_time) exist
+        if not column_exists("receipts", "status"):
+            try:
+                cur.execute("ALTER TABLE receipts ADD COLUMN status VARCHAR")
+                cur.execute("UPDATE receipts SET status='Pending' WHERE status IS NULL")
+            except Exception:
+                pass
+
+        if not column_exists("receipts", "pickup_time"):
+            try:
+                cur.execute("ALTER TABLE receipts ADD COLUMN pickup_time TIMESTAMP_NTZ")
+            except Exception:
+                pass
+
     finally:
         try:
             cur.close()
@@ -74,13 +123,14 @@ def ensure_tables_and_columns():
         except Exception:
             pass
 
+# Run the ensure step (wrap so app still works without creds)
 try:
     ensure_tables_and_columns()
 except Exception as e:
-    st.warning(f"Could not ensure DB schema: {e}")
+    st.warning(f"Could not ensure DB schema (continuing in limited/local mode): {e}")
 
 # ---------------------------
-# Password utilities
+# Password hashing (PBKDF2)
 # ---------------------------
 def hash_password(password: str, salt: bytes | None = None) -> str:
     if salt is None:
@@ -98,21 +148,23 @@ def verify_password(stored: str, provided_password: str) -> bool:
         return False
 
 # ---------------------------
-# DB helpers
+# DB helpers: accounts / feedback / receipts / loyalty
 # ---------------------------
-def save_account(username, password, role="Non-Staff"):
+def save_account(username: str, password: str, role: str = "Non-Staff"):
     conn = get_connection()
     cur = conn.cursor()
     hashed = hash_password(password)
     try:
-        cur.execute("INSERT INTO accounts (username, password, role) VALUES (%s, %s, %s)",
-                    (username, hashed, role))
+        cur.execute(
+            "INSERT INTO accounts (username, password, role) VALUES (%s, %s, %s)",
+            (username, hashed, role)
+        )
         conn.commit()
     finally:
         cur.close()
         conn.close()
 
-def get_account(username):
+def get_account(username: str):
     conn = get_connection()
     cur = conn.cursor()
     try:
@@ -125,7 +177,7 @@ def get_account(username):
         return {"username": row[0], "password": row[1], "role": row[2], "loyalty_points": int(row[3] or 0)}
     return None
 
-def validate_account(username, password):
+def validate_account(username: str, password: str):
     acc = get_account(username)
     if not acc:
         return None
@@ -133,12 +185,11 @@ def validate_account(username, password):
         return {"username": acc["username"], "role": acc["role"], "loyalty_points": acc["loyalty_points"]}
     return None
 
-def update_loyalty_points(username, delta):
+def update_loyalty_points(username: str, delta: int):
     conn = get_connection()
     cur = conn.cursor()
     try:
-        cur.execute("UPDATE accounts SET loyalty_points = COALESCE(loyalty_points,0) + %s WHERE username=%s",
-                    (int(delta), username))
+        cur.execute("UPDATE accounts SET loyalty_points = COALESCE(loyalty_points,0) + %s WHERE username=%s", (int(delta), username))
         conn.commit()
         cur.execute("SELECT loyalty_points FROM accounts WHERE username=%s", (username,))
         r = cur.fetchone()
@@ -147,7 +198,7 @@ def update_loyalty_points(username, delta):
         cur.close()
         conn.close()
 
-def save_feedback(item, feedback, rating, username="Anon"):
+def save_feedback(item: str, feedback: str, rating: int, username: str = "Anon"):
     conn = get_connection()
     cur = conn.cursor()
     try:
@@ -171,7 +222,7 @@ def load_feedbacks_df():
         return pd.DataFrame(rows, columns=["item", "feedback", "rating", "timestamp"])
     return pd.DataFrame(columns=["item", "feedback", "rating", "timestamp"])
 
-def save_receipt(order_id, items, total, payment_method, details="", pickup_time=None, status="Pending", user_id=None):
+def save_receipt(order_id: str, items: str, total: float, payment_method: str, details: str = "", pickup_time: datetime = None, status: str = "Pending", user_id: str = None):
     conn = get_connection()
     cur = conn.cursor()
     try:
@@ -197,7 +248,7 @@ def load_receipts_df():
         return pd.DataFrame(rows, columns=["order_id","user_id","items","total","payment_method","details","pickup_time","status","timestamp"])
     return pd.DataFrame(columns=["order_id","user_id","items","total","payment_method","details","pickup_time","status","timestamp"])
 
-def set_receipt_status(order_id, new_status):
+def set_receipt_status(order_id: str, new_status: str):
     conn = get_connection()
     cur = conn.cursor()
     try:
@@ -209,7 +260,7 @@ def set_receipt_status(order_id, new_status):
     return True
 
 # ---------------------------
-# Menu data
+# In-memory menu + sold_out state (demo)
 # ---------------------------
 menu_data = {
     "Breakfast": {"Tapsilog": 70, "Longsilog": 65, "Hotdog Meal": 50, "Omelette": 45},
@@ -223,7 +274,7 @@ if "sold_out" not in st.session_state:
     st.session_state.sold_out = set()
 
 # ---------------------------
-# Groq client
+# Groq client (optional)
 # ---------------------------
 try:
     client = Groq(api_key=st.secrets["GROQ_API_KEY"])
@@ -231,72 +282,66 @@ except Exception:
     client = None
 
 # ---------------------------
-# Session state init
+# Session initialization
 # ---------------------------
-if "page" not in st.session_state: st.session_state.page = "login"
-if "user" not in st.session_state: st.session_state.user = None
-if "cart" not in st.session_state: st.session_state.cart = {}
-if "loyalty_points" not in st.session_state: st.session_state.loyalty_points = 0
-if "notifications" not in st.session_state: st.session_state.notifications = []
-
-# ---------------------------
-# UI setup
-# ---------------------------
-st.set_page_config(page_title="BiteHub Canteen GenAI", layout="wide")
-st.markdown("""
-<style>
-header[data-testid="stHeader"] { display: none; }
-div.stButton > button { width:180px; height:44px; margin:8px; font-size:15px; border-radius:8px; }
-.center-buttons { text-align:center; }
-.login-card { background:rgba(255,255,255,0.95); padding:20px; border-radius:10px; max-width:720px; margin:12px auto; box-shadow:0 6px 20px rgba(0,0,0,0.25); }
-[data-testid="stAppViewContainer"] > section:first-child { padding-top:6px; }
-</style>""", unsafe_allow_html=True)
-
-# Main app pages (login/signup/etc.) would continue here
-
-Replace all references of st.session_state.points with st.session_state.loyalty_points
-
-Replace update_points() calls with update_loyalty_points()
-
-Apply discounts and display balances using loyalty_points
-
-
-#Main app pages (login/signup/etc.) would continue here
-
-Replace all references of st.session_state.points with st.session_state.loyalty_points
-
-#Replace update_points() calls with update_loyalty_points()
-
-#Apply discounts and display balances using loyalty_points
-
-
-
-# background image loader (optional)
-def set_background(image_path):
-    try:
-        with open(image_path, "rb") as f:
-            data = f.read()
-        img_b64 = base64.b64encode(data).decode()
-        css = f"""
-        <style>
-        .stApp {{
-            background-image: url("data:image/jpg;base64,{img_b64}");
-            background-size: cover;
-            background-position: center;
-        }}
-        </style>
-        """
-        st.markdown(css, unsafe_allow_html=True)
-    except Exception as e:
-        st.warning(f"Could not load background: {e}")
-
-if os.path.exists("can.jpg"):
-    set_background("can.jpg")
+if "page" not in st.session_state:
+    st.session_state.page = "login"
+if "user" not in st.session_state:
+    st.session_state.user = None
+if "cart" not in st.session_state:
+    st.session_state.cart = {}
+# session-level fallback loyalty_points (used only for guests/local)
+if "loyalty_points" not in st.session_state:
+    st.session_state.loyalty_points = 0
+if "notifications" not in st.session_state:
+    st.session_state.notifications = []
 
 # ---------------------------
-# AI wrapper
+# UI CSS (hide header, clean spacing, hide clear/reveal icons)
 # ---------------------------
-def run_ai(question, extra_context=""):
+st.markdown(
+    """
+    <style>
+    /* hide default Streamlit header */
+    header[data-testid="stHeader"] { display: none; }
+
+    /* tighten top spacing so no white box appears */
+    [data-testid="stAppViewContainer"] > section:first-child {
+        padding-top: 6px;
+    }
+
+    /* login card look */
+    .login-card {
+        background: rgba(255,255,255,0.95);
+        padding: 20px;
+        border-radius: 10px;
+        max-width: 720px;
+        margin: 12px auto;
+        box-shadow: 0 6px 20px rgba(0,0,0,0.12);
+    }
+
+    /* uniform button sizes */
+    div.stButton > button {
+        display: inline-block;
+        margin: 8px;
+        width: 180px;
+        height: 44px;
+        font-size: 15px;
+        border-radius: 8px;
+    }
+
+    /* Hide native clear/reveal buttons in inputs (Chrome/Edge/IE) */
+    input::-ms-clear, input::-ms-reveal { display: none; width: 0; height: 0; }
+    input::-webkit-search-cancel-button, input::-webkit-contacts-auto-fill-button, input::-webkit-clear-button { display: none; }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+# ---------------------------
+# AI wrapper (calls Groq if configured)
+# ---------------------------
+def run_ai(question: str, extra_context: str = "") -> str:
     if not client:
         return "⚠️ AI unavailable (no Groq client configured)."
     if not question:
@@ -307,23 +352,23 @@ def run_ai(question, extra_context=""):
     try:
         resp = client.chat.completions.create(
             model="llama-3.1-8b-instant",
-            messages=[{"role":"user","content":prompt}],
+            messages=[{"role": "user", "content": prompt}],
         )
         return resp.choices[0].message.content
     except Exception as e:
         return f"⚠️ AI unavailable: {e}"
 
 # ---------------------------
-# Password validator
+# Password validator for signup
 # ---------------------------
 def password_valid_rules(pw: str):
-    # symbol check: any non-alphanumeric and non-space character
     rules = {
         "length": len(pw) >= 12,
         "upper": bool(re.search(r"[A-Z]", pw)),
         "lower": bool(re.search(r"[a-z]", pw)),
         "digit": bool(re.search(r"[0-9]", pw)),
-        "symbol": bool(re.search(r"[^\w\s]", pw))  # improved symbol detection
+        # symbol: any non-word, non-space char
+        "symbol": bool(re.search(r"[^\w\s]", pw)),
     }
     return rules
 
@@ -341,12 +386,14 @@ if st.session_state.page == "login":
     col1, col2, col3 = st.columns([1,1,1])
     with col1:
         if st.button("Log In", key="login_btn"):
+            user = None
             try:
                 user = validate_account(username, password)
             except Exception as e:
                 st.error(f"Login error (DB): {e}")
                 user = None
             if user:
+                # user contains loyalty_points
                 st.session_state.user = user
                 st.session_state.page = "main"
                 st.success(f"Welcome, {user['username']}!")
@@ -354,8 +401,8 @@ if st.session_state.page == "login":
                 st.error("❌ Invalid username or password. Please try again or create an account.")
     with col2:
         if st.button("Guest Account", key="guest_btn"):
-            # Set guest user (no points, limited features)
-            st.session_state.user = {"username": "Guest", "role": "Non-Staff", "points": 0}
+            # Guest session: no DB account, limited features
+            st.session_state.user = {"username": "Guest", "role": "Non-Staff", "loyalty_points": 0}
             st.session_state.page = "main"
             st.success("Signed in as Guest")
     with col3:
@@ -372,9 +419,9 @@ elif st.session_state.page == "signup":
     new_pass = st.text_input("New Password", type="password", key="signup_password")
     new_role = st.selectbox("Role", ["Non-Staff", "Staff"], key="signup_role")
 
-    # live validation
+    # live validation display
     rules = password_valid_rules(new_pass)
-    st.markdown("**Password rules:** (all must be green to enable Register)")
+    st.markdown("**Password rules:** (all must be ✅ to register)")
     st.write(f"- Minimum 12 chars: {'✅' if rules['length'] else '❌'}")
     st.write(f"- Uppercase letter: {'✅' if rules['upper'] else '❌'}")
     st.write(f"- Lowercase letter: {'✅' if rules['lower'] else '❌'}")
@@ -405,23 +452,22 @@ elif st.session_state.page == "signup":
 # MAIN Portal (Non-Staff and Staff)
 # ---------------------------
 elif st.session_state.page == "main":
-    user = st.session_state.user or {"username": "Guest", "role": "Non-Staff", "points": 0}
-    # ensure user dict has points
-    if "points" not in user:
-        user["points"] = user.get("points", 0)
+    user = st.session_state.user or {"username": "Guest", "role": "Non-Staff", "loyalty_points": 0}
+    # normalize structure: ensure 'loyalty_points' exists
+    if "loyalty_points" not in user:
+        user["loyalty_points"] = user.get("loyalty_points", 0)
 
-    # Guest banner placed at the top (above AI)
+    # Guest banner above AI assistant (only one message)
     if user["username"] == "Guest":
         st.warning("🔓 You're on a Guest session. Create an account to enjoy loyalty points, promos, and feedback posting.")
 
     st.title(f"🏫 Welcome {user['username']} to BiteHub")
 
-    # COMMON: AI assistant area for all roles (Non-Staff and Staff)
+    # COMMON: AI assistant area for all roles
     st.markdown("### 🤖 Canteen AI Assistant")
-    q = st.text_input("Ask about menu, budget, feedback, or sales:", key="ai_query_main")
+    q = st.text_input("Ask about menu, budget, feedback, or ordering:", key="ai_query_main")
     if st.button("Ask AI", key="ai_button_main"):
         extra = ""
-        # provide non-sensitive context for staff or non-staff
         try:
             sales_df = load_receipts_df()
             feedback_df = load_feedbacks_df()
@@ -433,7 +479,7 @@ elif st.session_state.page == "main":
 
     st.divider()
 
-    # Non-Staff view (also applies to Guest with some limits)
+    # Non-Staff (includes Guest)
     if user["role"] == "Non-Staff":
         is_guest = (user["username"] == "Guest")
 
@@ -452,7 +498,7 @@ elif st.session_state.page == "main":
                         qty_key = f"qty_{cat}_{item_name}"
                         qty = cols[0].number_input(f"{item_name} (₱{price})", min_value=0, value=0, step=1, key=qty_key)
                         if cols[1].button("Add", key=f"add_{cat}_{item_name}") and qty > 0:
-                            st.session_state.cart[item_name] = st.session_state.cart.get(item_name,0) + qty
+                            st.session_state.cart[item_name] = st.session_state.cart.get(item_name, 0) + qty
                             st.success(f"Added {qty} x {item_name}")
 
             # cart summary & checkout
@@ -460,34 +506,33 @@ elif st.session_state.page == "main":
                 st.subheader("🛒 Your Cart")
                 total = 0
                 for it, qtt in st.session_state.cart.items():
-                    price = next((p for cat in menu_data.values() for n,p in cat.items() if n==it), 0)
+                    price = next((p for cat in menu_data.values() for n,p in cat.items() if n == it), 0)
                     st.write(f"{it} x {qtt} = ₱{price*qtt}")
                     total += price*qtt
 
                 st.write(f"**Subtotal: ₱{total}**")
-                # loyalty points display for non-guest accounts only
+
+                # loyalty points display for logged-in users
                 user_points = 0
                 if not is_guest:
                     try:
                         db_acc = get_account(user["username"])
-                        user_points = db_acc.get("points", 0) if db_acc else 0
+                        user_points = db_acc.get("loyalty_points", 0) if db_acc else 0
                     except Exception:
-                        user_points = st.session_state.get("points", 0)
+                        user_points = st.session_state.loyalty_points
                     st.write(f"🔖 Points available: {user_points} pts (100 pts = ₱1)")
 
-                # Tiered discounts
+                # Tiered discounts (only for logged in users)
                 discount = 0
                 applied_points = 0
                 if not is_guest:
-                    # offer tier options
                     tier_options = []
                     if user_points >= 500:
-                        tier_options.append(("Use 500+ pts → ₱10 discount", 10, 500))
+                        tier_options.append(("Use 500 pts → ₱10 discount", 10, 500))
                     if user_points >= 200:
                         tier_options.append(("Use 200 pts → ₱3 discount", 3, 200))
                     if user_points >= 100:
                         tier_options.append(("Use 100 pts → ₱1 discount", 1, 100))
-                    # allow simple custom redemption up to floor(user_points/100)
                     if tier_options:
                         st.markdown("**Redeem points for preset discounts:**")
                         chosen = st.selectbox("Choose redemption (optional)", ["None"] + [t[0] for t in tier_options], key="redeem_choice")
@@ -505,7 +550,7 @@ elif st.session_state.page == "main":
                 pickup_date = st.date_input("Pickup date (optional)", value=date.today(), key="pickup_date")
                 pickup_time = st.time_input("Pickup time (optional)", value=datetime.now().time(), key="pickup_time")
 
-                payment_method = st.radio("Payment Method", ["Cash","Card","E-Wallet"], key="pmethod")
+                payment_method = st.radio("Payment Method", ["Cash", "Card", "E-Wallet"], key="pmethod")
                 payment_details = ""
                 if payment_method == "Card":
                     payment_details = st.text_input("Card Number (mock)", key="card_num")
@@ -513,22 +558,22 @@ elif st.session_state.page == "main":
                     payment_details = st.selectbox("E-Wallet", ["GCash", "Maya", "QR Scan"], key="ewallet_type")
 
                 if st.button("Place Order", key="place_order_nonstaff"):
-                    # save receipt
                     order_id = f"ORD{random.randint(10000,99999)}"
                     items_str = ", ".join([f"{k}x{v}" for k,v in st.session_state.cart.items()])
                     pickup_dt = datetime.combine(pickup_date, pickup_time)
                     details = f"user:{user['username']}|notes:pickup scheduled"
                     try:
                         save_receipt(order_id, items_str, final_total, payment_method, details, pickup_time=pickup_dt, status="Pending", user_id=user['username'] if not is_guest else None)
-                        # update points if not guest
+                        # update loyalty points for non-guest
                         if not is_guest:
-                            # earn points: int(total)
                             earned = int(total)
-                            update_points(user['username'], earned)
-                            # deduct redeemed pts if used
-                            if applied_points > 0:
-                                update_points(user['username'], -applied_points)
-                        # add notification
+                            try:
+                                update_loyalty_points(user['username'], earned)
+                                if applied_points > 0:
+                                    update_loyalty_points(user['username'], -applied_points)
+                            except Exception:
+                                # if DB unavailable, update session fallback
+                                st.session_state.loyalty_points = st.session_state.loyalty_points + earned - applied_points
                         st.session_state.notifications.append(f"Order {order_id} placed for pickup {pickup_dt.strftime('%Y-%m-%d %H:%M')}")
                         st.success(f"✅ Order placed! Order ID: {order_id} | Total: ₱{final_total}")
                         st.session_state.cart = {}
@@ -542,7 +587,7 @@ elif st.session_state.page == "main":
                 st.info("Guests cannot submit feedback. Create an account to leave comments and ratings.")
             else:
                 fb_item = st.selectbox("Select Item:", ["(select)"] + [i for cat in menu_data.values() for i in cat.keys()], key="fb_item")
-                rating = st.slider("Rate this item (1-5):", 1,5,3, key="fb_rating")
+                rating = st.slider("Rate this item (1-5):", 1, 5, 3, key="fb_rating")
                 fb_text = st.text_area("Your Feedback:", key="fb_text")
                 if st.button("Submit Feedback", key="submit_fb_nonstaff"):
                     if fb_item != "(select)" and fb_text.strip():
@@ -567,10 +612,11 @@ elif st.session_state.page == "main":
         try:
             receipts_df = load_receipts_df()
             if not receipts_df.empty:
-                # parse details into dict and filter by user when not guest
-                receipts_df["parsed"] = receipts_df["details"].fillna("").apply(lambda d: dict([p.split(":",1) for p in d.split("|") if ":" in p]))
-                receipts_df["user"] = receipts_df["parsed"].apply(lambda p: p.get("user","") or p.get("user_id",""))
-                my = receipts_df if is_guest else receipts_df[receipts_df["user_id"]==user["username"]]
+                # filter by user_id if not guest
+                if not is_guest:
+                    my = receipts_df[receipts_df["user_id"] == user["username"]]
+                else:
+                    my = receipts_df
                 if not my.empty:
                     st.dataframe(my[["order_id","items","total","payment_method","pickup_time","status","timestamp"]])
                 else:
@@ -580,27 +626,27 @@ elif st.session_state.page == "main":
         except Exception as e:
             st.error(f"Could not load receipts: {e}")
 
-        # logout placed below content
+        # logout button
         if st.button("Log Out", key="logout_nonstaff"):
             st.session_state.page = "login"
             st.session_state.user = None
 
+    # ---------------------------
     # STAFF PORTAL
+    # ---------------------------
     elif user["role"] == "Staff":
         st.title("🛠️ BiteHub Staff Portal")
-        # staff should use main area, not sidebar; but we keep a compact sidebar nav
-        choice = st.sidebar.radio("Staff Menu", ["Dashboard","Pending Orders","Manage Menu","AI Assistant","Feedback Review","Sales Report"])
+        choice = st.sidebar.radio("Staff Menu", ["Dashboard", "Pending Orders", "Manage Menu", "AI Assistant", "Feedback Review", "Sales Report"])
 
         if choice == "Dashboard":
             st.subheader("📊 Staff Dashboard")
             st.info("Overview: pending orders, quick sales, and recent feedback.")
-            # quick counts
             try:
                 receipts = load_receipts_df()
                 fb = load_feedbacks_df()
                 st.metric("Total Orders", len(receipts))
                 st.metric("Feedbacks", len(fb))
-                pending = receipts[receipts["status"].str.lower()=="pending"] if not receipts.empty else pd.DataFrame()
+                pending = receipts[receipts["status"].str.lower() == "pending"] if not receipts.empty else pd.DataFrame()
                 st.metric("Pending Orders", len(pending))
             except Exception as e:
                 st.error(f"Could not load quick stats: {e}")
@@ -610,7 +656,7 @@ elif st.session_state.page == "main":
             try:
                 receipts_df = load_receipts_df()
                 if not receipts_df.empty:
-                    pending = receipts_df[receipts_df["status"].str.lower()=="pending"]
+                    pending = receipts_df[receipts_df["status"].str.lower() == "pending"]
                     if not pending.empty:
                         for _, row in pending.iterrows():
                             st.write(f"Order {row['order_id']}: {row['items']} — ₱{row['total']} | Pickup: {row['pickup_time']} | By: {row['user_id']}")
@@ -651,7 +697,6 @@ elif st.session_state.page == "main":
             st.subheader("🤖 Staff AI Assistant")
             staff_q = st.text_input("Ask Staff AI", key="staff_ai_q")
             if st.button("Ask Staff AI", key="staff_ai_btn"):
-                # create context from latest sales & feedback
                 try:
                     sales = load_receipts_df().head(50).to_dict()
                     fb = load_feedbacks_df().head(50).to_dict()
@@ -678,7 +723,6 @@ elif st.session_state.page == "main":
                 receipts_df = load_receipts_df()
                 if not receipts_df.empty:
                     st.dataframe(receipts_df)
-                    # small bar chart: sales by payment method
                     sums = receipts_df.groupby("payment_method")["total"].sum()
                     st.bar_chart(sums)
                 else:
@@ -686,15 +730,7 @@ elif st.session_state.page == "main":
             except Exception as e:
                 st.error(f"Could not load sales: {e}")
 
-        # Logout bottom
+        # staff logout
         if st.button("Log Out", key="logout_staff"):
             st.session_state.page = "login"
             st.session_state.user = None
-
-
-
-
-
-
-
-

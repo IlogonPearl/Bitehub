@@ -518,25 +518,33 @@ elif st.session_state.page == "main":
         st.dataframe(fb)
 
         st.subheader("📦 Pending Orders")
-        rec = load_receipts_df()
-        if not rec.empty:
-            pending = rec[rec["details"].fillna("").str.contains("status:pending")]
-            if not pending.empty:
-                for _, row in pending.iterrows():
-                    st.write(f"📌 Order {row['order_id']} — {row['items']} — {row['details']}")
-                    if st.button(f"Mark Ready {row['order_id']}"):
-                        update_receipt_status(row['order_id'], "ready for pickup")
-                        st.success(f"Order {row['order_id']} marked as ready!")
-            else:
-                st.info("No pending orders.")
+
+try:
+    receipts_df = load_receipts_df()
+    if not receipts_df.empty:
+        # Parse details into dictionary
+        receipts_df["parsed"] = receipts_df["details"].fillna("").apply(
+            lambda d: dict([p.split(":", 1) for p in d.split("|") if ":" in p])
+        )
+        receipts_df["user"] = receipts_df["parsed"].apply(lambda p: p.get("user", ""))
+        receipts_df["status"] = receipts_df["parsed"].apply(lambda p: p.get("status", "unknown"))
+        receipts_df["pickup"] = receipts_df["parsed"].apply(lambda p: p.get("pickup", ""))
+
+        # Filter pending
+        pending = receipts_df[receipts_df["status"] == "pending"]
+
+        if not pending.empty:
+            for i, row in pending.iterrows():
+                st.write(f"**Order {row['order_id']}** — {row['items']} | Pickup: {row['pickup']} | By {row['user']}")
+                if st.button(f"Mark Ready — {row['order_id']}", key=f"ready_{row['order_id']}"):
+                    success = update_receipt_status(row["order_id"], "ready for pickup")
+                    if success:
+                        st.success(f"✅ Order {row['order_id']} marked as Ready for Pickup")
+                    else:
+                        st.error("⚠️ Could not update order status.")
         else:
-            st.info("No orders found.")
-
-        st.subheader("📊 All Sales")
-        st.dataframe(rec)
-
-        if st.button("Log Out"):
-            st.session_state.page = "login"
-            st.session_state.user = None
-
-
+            st.info("No pending orders.")
+    else:
+        st.info("No receipts yet.")
+except Exception as e:
+    st.error(f"Could not load pending orders: {e}")

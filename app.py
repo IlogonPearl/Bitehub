@@ -460,8 +460,8 @@ elif st.session_state.page == "main":
             st.error(f"Could not load feedbacks: {e}")
 
         # Sales report (simple)
-        st.subh    st.session_state.sold_out = set()
-
+        st.subheader("🍽️ Today's Specials")
+        st.session_state.sold_out = set()
 # -------------------------------------------------
 #  Groq client (AI)
 # -------------------------------------------------
@@ -886,6 +886,7 @@ elif st.session_state.page == "main":
         st.error("Unknown role. Please log out and log in again.")
 
 # end of app
+
 
 
 

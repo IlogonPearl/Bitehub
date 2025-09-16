@@ -1,13 +1,10 @@
-#app.py - BiteHub (compiled) with header hidden and loyalty_points rename
-
 import os 
 import base64 
 import streamlit as st 
-import pandas as pd 
+import pandas as pd
 import snowflake.connector 
 from groq import Groq 
-import random 
-from datetime import datetime, date, time 
+import random from datetime import datetime, date, time 
 import matplotlib.pyplot as plt 
 import hashlib 
 import secrets 
@@ -67,35 +64,35 @@ def load_receipts_df(): conn = get_connection() cur = conn.cursor() try: cur.exe
 
 def set_receipt_status(order_id, new_status): conn = get_connection() cur = conn.cursor() try: cur.execute("UPDATE receipts SET status=%s WHERE order_id=%s", (new_status, order_id)) conn.commit() finally: cur.close() conn.close() return True
 
----------------------------
+#--------------------------
 
 Menu data
 
----------------------------
+#---------------------------
 
 menu_data = { "Breakfast": {"Tapsilog": 70, "Longsilog": 65, "Hotdog Meal": 50, "Omelette": 45}, "Lunch": {"Chicken Adobo": 90, "Pork Sinigang": 100, "Beef Caldereta": 120, "Rice": 15}, "Snack": {"Burger": 50, "Fries": 30, "Siomai Rice": 60, "Spaghetti": 45}, "Drinks": {"Soda": 20, "Iced Tea": 25, "Bottled Water": 15, "Coffee": 30}, "Dessert": {"Halo-Halo": 65, "Leche Flan": 40, "Ice Cream": 35}, "Dinner": {"Grilled Chicken": 95, "Sisig": 110, "Fried Bangus": 85, "Rice": 15}, } if "sold_out" not in st.session_state: st.session_state.sold_out = set()
 
----------------------------
+#---------------------------
 
 Groq client
 
----------------------------
+#---------------------------
 
 try: client = Groq(api_key=st.secrets["GROQ_API_KEY"]) except Exception: client = None
 
----------------------------
+#---------------------------
 
 Session state init
 
----------------------------
+#---------------------------
 
 if "page" not in st.session_state: st.session_state.page = "login" if "user" not in st.session_state: st.session_state.user = None if "cart" not in st.session_state: st.session_state.cart = {} if "loyalty_points" not in st.session_state: st.session_state.loyalty_points = 0 if "notifications" not in st.session_state: st.session_state.notifications = []
 
----------------------------
+#---------------------------
 
 UI setup
 
----------------------------
+#---------------------------
 
 st.set_page_config(page_title="BiteHub Canteen GenAI", layout="wide") st.markdown("""
 
@@ -107,8 +104,6 @@ div.stButton > button { width:180px; height:44px; margin:8px; font-size:15px; bo
 [data-testid="stAppViewContainer"] > section:first-child { padding-top:6px; }
 </style>""", unsafe_allow_html=True)
 
----------------------------
-
 Main app pages (login/signup/etc.) would continue here
 
 Replace all references of st.session_state.points with st.session_state.loyalty_points
@@ -117,7 +112,15 @@ Replace update_points() calls with update_loyalty_points()
 
 Apply discounts and display balances using loyalty_points
 
----------------------------
+
+#Main app pages (login/signup/etc.) would continue here
+
+Replace all references of st.session_state.points with st.session_state.loyalty_points
+
+#Replace update_points() calls with update_loyalty_points()
+
+#Apply discounts and display balances using loyalty_points
+
 
 
 # background image loader (optional)
@@ -539,6 +542,7 @@ elif st.session_state.page == "main":
         if st.button("Log Out", key="logout_staff"):
             st.session_state.page = "login"
             st.session_state.user = None
+
 
 
 

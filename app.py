@@ -1,4 +1,3 @@
-# app.py - BiteHub (compiled, ready-to-paste)
 import os
 import base64
 import streamlit as st
@@ -12,14 +11,8 @@ import hashlib
 import secrets
 import re
 
-# ---------------------------
-# Page config (do this early)
-# ---------------------------
 st.set_page_config(page_title="BiteHub Canteen GenAI", layout="wide")
 
-# ---------------------------
-# Snowflake connection helper
-# ---------------------------
 def get_connection():
     # Make sure st.secrets has your SNOWFLAKE_* values
     return snowflake.connector.connect(
@@ -31,9 +24,7 @@ def get_connection():
         schema=st.secrets["SNOWFLAKE_SCHEMA"],
     )
 
-# ---------------------------
-# Ensure tables & columns exist (safe, preserve data)
-# ---------------------------
+
 def ensure_tables_and_columns():
     try:
         conn = get_connection()
@@ -129,9 +120,7 @@ try:
 except Exception as e:
     st.warning(f"Could not ensure DB schema (continuing in limited/local mode): {e}")
 
-# ---------------------------
-# Password hashing (PBKDF2)
-# ---------------------------
+
 def hash_password(password: str, salt: bytes | None = None) -> str:
     if salt is None:
         salt = secrets.token_bytes(16)
@@ -147,9 +136,7 @@ def verify_password(stored: str, provided_password: str) -> bool:
     except Exception:
         return False
 
-# ---------------------------
-# DB helpers: accounts / feedback / receipts / loyalty
-# ---------------------------
+
 def save_account(username: str, password: str, role: str = "Non-Staff"):
     conn = get_connection()
     cur = conn.cursor()
@@ -259,9 +246,6 @@ def set_receipt_status(order_id: str, new_status: str):
         conn.close()
     return True
 
-# ---------------------------
-# In-memory menu + sold_out state (demo)
-# ---------------------------
 menu_data = {
     "Breakfast": {"Tapsilog": 70, "Longsilog": 65, "Hotdog Meal": 50, "Omelette": 45},
     "Lunch": {"Chicken Adobo": 90, "Pork Sinigang": 100, "Beef Caldereta": 120, "Rice": 15},
@@ -273,17 +257,13 @@ menu_data = {
 if "sold_out" not in st.session_state:
     st.session_state.sold_out = set()
 
-# ---------------------------
-# Groq client (optional)
-# ---------------------------
+
 try:
     client = Groq(api_key=st.secrets["GROQ_API_KEY"])
 except Exception:
     client = None
 
-# ---------------------------
-# Session initialization
-# ---------------------------
+
 if "page" not in st.session_state:
     st.session_state.page = "login"
 if "user" not in st.session_state:
@@ -296,9 +276,6 @@ if "loyalty_points" not in st.session_state:
 if "notifications" not in st.session_state:
     st.session_state.notifications = []
 
-# ---------------------------
-# UI CSS (hide header, clean spacing, hide clear/reveal icons)
-# ---------------------------
 st.markdown(
     """
     <style>
@@ -338,9 +315,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# ---------------------------
-# AI wrapper (calls Groq if configured)
-# ---------------------------
+
 def run_ai(question: str, extra_context: str = "") -> str:
     if not client:
         return "⚠️ AI unavailable (no Groq client configured)."
@@ -358,9 +333,7 @@ def run_ai(question: str, extra_context: str = "") -> str:
     except Exception as e:
         return f"⚠️ AI unavailable: {e}"
 
-# ---------------------------
-# Password validator for signup
-# ---------------------------
+
 def password_valid_rules(pw: str):
     rules = {
         "length": len(pw) >= 12,
@@ -372,9 +345,7 @@ def password_valid_rules(pw: str):
     }
     return rules
 
-# ---------------------------
-# Pages: Login / Signup / Main
-# ---------------------------
+
 if st.session_state.page == "login":
     st.markdown('<div class="login-card">', unsafe_allow_html=True)
     st.markdown("<h2>☕ BiteHub — Login</h2>", unsafe_allow_html=True)
@@ -734,4 +705,5 @@ elif st.session_state.page == "main":
         if st.button("Log Out", key="logout_staff"):
             st.session_state.page = "login"
             st.session_state.user = None
+
 

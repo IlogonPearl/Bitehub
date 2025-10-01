@@ -252,8 +252,10 @@ elif st.session_state.page == "signup":
 # ---------------------------
 
 elif st.session_state.page == "main":
-    user = st.session_state.user or {"username": "Guest", "role": "Non-Staff", "loyalty_points": 0}
-    # normalize structure: ensure 'loyalty_points' exists
+    user = st.session_state.user or {"username": "Guest", "role": "Non-Staff", "loyalty_points",0}
+    st.title(f"🏫 Welcome {user['username']} to BiteHub")
+    st.write("Main portal goes here... (menus, orders, staff, etc.)")
+    
     if "loyalty_points" not in user:
         user["loyalty_points"] = user.get("loyalty_points", 0)
 
@@ -534,6 +536,7 @@ elif st.session_state.page == "main":
         if st.button("Log Out", key="logout_staff"):
             st.session_state.page = "login"
             st.session_state.user = None
+
 
 
 

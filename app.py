@@ -181,7 +181,6 @@ elif st.session_state.page == "main":
     }
 
     st.title(f"🏫 Welcome {user['username']} to BiteHub")
-    st.write("Main portal goes here... (menus, orders, staff, etc.)")
 
     # rest of your main portal code...
 
@@ -465,6 +464,7 @@ elif st.session_state.page == "main":
         if st.button("Log Out", key="logout_staff"):
             st.session_state.page = "login"
             st.session_state.user = None
+
 
 
 

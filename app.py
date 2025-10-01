@@ -188,7 +188,7 @@ if st.session_state.page == "login":
             if user:
                 st.session_state.user = user
                 st.session_state.page = "main"
-                st.rerun()   # 👈 direct rerun, no st.success()
+                st.rerun()
             else:
                 st.error("Invalid username or password.")
 
@@ -207,6 +207,7 @@ if st.session_state.page == "login":
             st.session_state.page = "signup"
             st.rerun()
 
+# ---------------------------
 # SIGNUP PAGE
 # ---------------------------
 elif st.session_state.page == "signup":
@@ -217,15 +218,14 @@ elif st.session_state.page == "signup":
     new_pass = st.text_input("New Password", type="password")
     new_role = st.selectbox("Role", ["Non-Staff", "Staff"])
 
-   if st.button("Register"):
-    if get_account(new_username):
-        st.error("Username already exists.")
-    else:
-        save_account(new_username, new_pass, new_role)
-        st.session_state.page = "main"
-        st.session_state.user = {"username": new_username, "role": new_role, "loyalty_points": 0}
-        st.rerun()
-
+    if st.button("Register"):
+        if get_account(new_username):
+            st.error("Username already exists.")
+        else:
+            save_account(new_username, new_pass, new_role)
+            st.session_state.page = "main"
+            st.session_state.user = {"username": new_username, "role": new_role, "loyalty_points": 0}
+            st.rerun()
 
     if st.button("Back to Login"):
         st.session_state.page = "login"
@@ -236,12 +236,13 @@ elif st.session_state.page == "signup":
 # ---------------------------
 # MAIN PORTAL
 # ---------------------------
-
 elif st.session_state.page == "main":
-    user = st.session_state.user or {"username": "Guest", "role": "Non-Staff", "loyalty_points",0}
+    user = st.session_state.user or {"username": "Guest", "role": "Non-Staff", "loyalty_points": 0}
     st.title(f"🏫 Welcome {user['username']} to BiteHub")
     st.write("Main portal goes here... (menus, orders, staff, etc.)")
-    
+
+    # rest of your main portal code...
+
     if "loyalty_points" not in user:
         user["loyalty_points"] = user.get("loyalty_points", 0)
 
@@ -522,6 +523,7 @@ elif st.session_state.page == "main":
         if st.button("Log Out", key="logout_staff"):
             st.session_state.page = "login"
             st.session_state.user = None
+
 
 
 

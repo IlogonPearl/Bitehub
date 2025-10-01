@@ -11,16 +11,51 @@ import hashlib
 import secrets
 import re
 
-# ---------------------------
-# PAGE CONFIG & BACKGROUND
-# ---------------------------
-st.set_page_config(page_title="BiteHub", layout="wide")
+# ----------------- CONNECT TO SNOWFLAKE -----------------
+def get_connection():
+    return snowflake.connector.connect(
+        user=st.secrets["SNOWFLAKE_USER"],
+        password=st.secrets["SNOWFLAKE_PASSWORD"],
+        account=st.secrets["SNOWFLAKE_ACCOUNT"],
+        warehouse=st.secrets["SNOWFLAKE_WAREHOUSE"],
+        database=st.secrets["SNOWFLAKE_DATABASE"],
+        schema=st.secrets["SNOWFLAKE_SCHEMA"]
+    )
 
-def set_background(image_file: str):
+# ----------------- ACCOUNT MANAGEMENT -----------------
+def hash_password(password):
+    return hashlib.sha256(password.encode()).hexdigest()
+
+def save_account(username, password, role):
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("INSERT INTO accounts (username, password, role, loyalty_points) VALUES (%s, %s, %s, %s)", 
+                (username, hash_password(password), role, 0))
+    conn.commit()
+    cur.close()
+    conn.close()
+
+def get_account(username):
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("SELECT username, password, role, loyalty_points FROM accounts WHERE username=%s", (username,))
+    row = cur.fetchone()
+    cur.close()
+    conn.close()
+    return row
+
+def validate_account(username, password):
+    row = get_account(username)
+    if row and row[1] == hash_password(password):
+        return {"username": row[0], "role": row[2], "loyalty_points": row[3]}
+    return None
+
+# ----------------- BACKGROUND IMAGE -----------------
+def set_background(image_file):
     with open(image_file, "rb") as f:
         encoded = base64.b64encode(f.read()).decode()
-    ext = image_file.split(".")[-1].lower()
-    mime = "jpeg" if ext in ["jpg", "jpeg"] else "png"
+    ext = image_file.split(".")[-1]
+    mime = "png" if ext.lower() == "png" else "jpg"
 
     st.markdown(
         f"""
@@ -32,147 +67,47 @@ def set_background(image_file: str):
             background-repeat: no-repeat;
         }}
         [data-testid="stHeader"] {{
-            background: rgba(0,0,0,0,0);
+            background: rgba(0,0,0,0);
         }}
         [data-testid="stSidebar"] {{
             background: rgba(255,255,255,0.85);
         }}
+        [data-testid="stToolbar"] {{display: none;}}
+        #MainMenu {{visibility: hidden;}}
+        footer {{visibility: hidden;}}
+
+        [data-testid="stAppViewContainer"] > .main {{
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+        }}
+
         .login-card {{
             background: rgba(0,0,0,0.65);
             padding: 2rem;
             border-radius: 1rem;
             box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+            text-align: center;
+            color: white;
+            max-width: 400px;
+            margin: auto;
         }}
         </style>
         """,
         unsafe_allow_html=True
     )
 
-# call this once at startup
-set_background("can.jpg")   # 👈 make sure can.jpg is in same folder as app.py
+# apply background
+set_background("can.jpg")
 
-# ---------------------------
-# DB CONNECTION
-# ---------------------------
-def get_connection():
-    return snowflake.connector.connect(
-        user=st.secrets["SNOWFLAKE_USER"],
-        password=st.secrets["SNOWFLAKE_PASSWORD"],
-        account=st.secrets["SNOWFLAKE_ACCOUNT"],
-        warehouse=st.secrets["SNOWFLAKE_WAREHOUSE"],
-        database=st.secrets["SNOWFLAKE_DATABASE"],
-        schema=st.secrets["SNOWFLAKE_SCHEMA"],
-    )
-
-# ---------------------------
-# DB INITIALIZATION
-# ---------------------------
-def ensure_tables_and_columns():
-    try:
-        conn = get_connection()
-        cur = conn.cursor()
-
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS accounts (
-                username VARCHAR PRIMARY KEY,
-                password VARCHAR,
-                role VARCHAR,
-                loyalty_points INT DEFAULT 0,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS feedbacks (
-                id INT AUTOINCREMENT PRIMARY KEY,
-                item VARCHAR,
-                feedback VARCHAR,
-                rating INT,
-                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS receipts (
-                id INT AUTOINCREMENT PRIMARY KEY,
-                order_id VARCHAR UNIQUE,
-                user_id VARCHAR,
-                items TEXT,
-                total FLOAT,
-                payment_method VARCHAR,
-                details TEXT,
-                pickup_time TIMESTAMP_NTZ,
-                status VARCHAR,
-                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-
-    finally:
-        try:
-            cur.close()
-            conn.commit()
-            conn.close()
-        except:
-            pass
-
-try:
-    ensure_tables_and_columns()
-except Exception as e:
-    st.warning(f"⚠️ Could not ensure DB schema: {e}")
-
-# ---------------------------
-# AUTH HELPERS
-# ---------------------------
-def hash_password(password: str, salt: bytes | None = None) -> str:
-    if salt is None:
-        salt = secrets.token_bytes(16)
-    hashed = hashlib.pbkdf2_hmac("sha256", password.encode(), salt, 200_000)
-    return salt.hex() + "$" + hashed.hex()
-
-def verify_password(stored: str, provided_password: str) -> bool:
-    try:
-        salt_hex, hash_hex = stored.split("$", 1)
-        salt = bytes.fromhex(salt_hex)
-        expected = hashlib.pbkdf2_hmac("sha256", provided_password.encode(), salt, 200_000)
-        return expected.hex() == hash_hex
-    except:
-        return False
-
-def save_account(username: str, password: str, role: str = "Non-Staff"):
-    conn = get_connection()
-    cur = conn.cursor()
-    hashed = hash_password(password)
-    cur.execute("INSERT INTO accounts (username, password, role) VALUES (%s, %s, %s)", (username, hashed, role))
-    conn.commit()
-    cur.close(); conn.close()
-
-def get_account(username: str):
-    conn = get_connection()
-    cur = conn.cursor()
-    cur.execute("SELECT username, password, role, loyalty_points FROM accounts WHERE username=%s", (username,))
-    row = cur.fetchone()
-    cur.close(); conn.close()
-    if row:
-        return {"username": row[0], "password": row[1], "role": row[2], "loyalty_points": int(row[3] or 0)}
-    return None
-
-def validate_account(username: str, password: str):
-    acc = get_account(username)
-    if acc and verify_password(acc["password"], password):
-        return {"username": acc["username"], "role": acc["role"], "loyalty_points": acc["loyalty_points"]}
-    return None
-
-# ---------------------------
-# SESSION STATE INIT
-# ---------------------------
+# ----------------- SESSION INIT -----------------
 if "page" not in st.session_state:
     st.session_state.page = "login"
 if "user" not in st.session_state:
     st.session_state.user = None
 
-# ---------------------------
-# LOGIN PAGE
-# ---------------------------
+# ----------------- LOGIN PAGE -----------------
 if st.session_state.page == "login":
     st.markdown('<div class="login-card">', unsafe_allow_html=True)
     st.markdown("<h2>☕ BiteHub — Login</h2>", unsafe_allow_html=True)
@@ -180,7 +115,7 @@ if st.session_state.page == "login":
     username = st.text_input("Username", placeholder="Enter username")
     password = st.text_input("Password", type="password", placeholder="Enter password")
 
-    col1, col2, col3 = st.columns([1,1,1])
+    col1, col2, col3 = st.columns(3)
 
     with col1:
         if st.button("Log In"):
@@ -188,7 +123,7 @@ if st.session_state.page == "login":
             if user:
                 st.session_state.user = user
                 st.session_state.page = "main"
-                st.rerun()
+                st.experimental_rerun()
             else:
                 st.error("Invalid username or password.")
 
@@ -197,19 +132,19 @@ if st.session_state.page == "login":
             st.session_state.user = {
                 "username": "Guest",
                 "role": "Non-Staff",
-                "loyalty_points": 0
+                "loyalty_points": 0,
             }
             st.session_state.page = "main"
-            st.rerun()
+            st.experimental_rerun()
 
     with col3:
         if st.button("Create Account"):
             st.session_state.page = "signup"
-            st.rerun()
+            st.experimental_rerun()
 
-# ---------------------------
-# SIGNUP PAGE
-# ---------------------------
+    st.markdown("</div>", unsafe_allow_html=True)
+
+# ----------------- SIGNUP PAGE -----------------
 elif st.session_state.page == "signup":
     st.markdown('<div class="login-card">', unsafe_allow_html=True)
     st.markdown("<h2>✍️ Create Account</h2>", unsafe_allow_html=True)
@@ -223,21 +158,28 @@ elif st.session_state.page == "signup":
             st.error("Username already exists.")
         else:
             save_account(new_username, new_pass, new_role)
+            st.session_state.user = {
+                "username": new_username,
+                "role": new_role,
+                "loyalty_points": 0,
+            }
             st.session_state.page = "main"
-            st.session_state.user = {"username": new_username, "role": new_role, "loyalty_points": 0}
-            st.rerun()
+            st.experimental_rerun()
 
     if st.button("Back to Login"):
         st.session_state.page = "login"
-        st.rerun()
+        st.experimental_rerun()
 
-    st.markdown('</div>', unsafe_allow_html=True)
+    st.markdown("</div>", unsafe_allow_html=True)
 
-# ---------------------------
-# MAIN PORTAL
-# ---------------------------
+# ----------------- MAIN PORTAL -----------------
 elif st.session_state.page == "main":
-    user = st.session_state.user or {"username": "Guest", "role": "Non-Staff", "loyalty_points": 0}
+    user = st.session_state.user or {
+        "username": "Guest",
+        "role": "Non-Staff",
+        "loyalty_points": 0,
+    }
+
     st.title(f"🏫 Welcome {user['username']} to BiteHub")
     st.write("Main portal goes here... (menus, orders, staff, etc.)")
 
@@ -523,6 +465,7 @@ elif st.session_state.page == "main":
         if st.button("Log Out", key="logout_staff"):
             st.session_state.page = "login"
             st.session_state.user = None
+
 
 
 

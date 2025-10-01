@@ -181,28 +181,27 @@ if st.session_state.page == "login":
     password = st.text_input("Password", type="password", placeholder="Enter password")
 
     col1, col2, col3 = st.columns([1,1,1])
-   with col1:
-    if st.button("Log In"):
-        user = validate_account(username, password)
-        if user:
-            st.session_state.user = user
+    with col1:
+        if st.button("Log In"):
+            user = validate_account(username, password)
+            if user:
+                st.session_state.user = user
+                st.session_state.page = "main"
+                st.rerun()   # 👈 direct rerun, no st.success()
+            else:
+                st.error("Invalid username or password.")
+
+    with col2:
+        if st.button("Guest Account"):
+            st.session_state.user = {"username": "Guest", "role": "Non-Staff", "loyalty_points": 0}
             st.session_state.page = "main"
-            st.rerun()   # 👈 direct rerun, no st.success()
-        else:
-            st.error("Invalid username or password.")
+            st.rerun()
 
-with col2:
-    if st.button("Guest Account"):
-        st.session_state.user = {"username": "Guest", "role": "Non-Staff", "loyalty_points": 0}
-        st.session_state.page = "main"
-        st.rerun()
+    with col3:
+        if st.button("Create Account"):
+            st.session_state.page = "signup"
+            st.rerun()
 
-with col3:
-    if st.button("Create Account"):
-        st.session_state.page = "signup"
-        st.rerun()
-
-    st.markdown('</div>', unsafe_allow_html=True)
 
 # ---------------------------
 # SIGNUP PAGE
@@ -520,6 +519,7 @@ elif st.session_state.page == "main":
         if st.button("Log Out", key="logout_staff"):
             st.session_state.page = "login"
             st.session_state.user = None
+
 
 
 

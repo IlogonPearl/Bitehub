@@ -11,10 +11,65 @@ import hashlib
 import secrets
 import re
 
+# ---------------------------
+# PAGE CONFIG
+# ---------------------------
 st.set_page_config(page_title="BiteHub Canteen GenAI", layout="wide")
 
+# ---------------------------
+# STYLES & BACKGROUND
+# ---------------------------
+def set_styles(background_image: str = None):
+    """Apply global CSS styles and optional background image."""
+    bg_css = ""
+    if background_image:
+        with open(background_image, "rb") as f:
+            b64 = base64.b64encode(f.read()).decode()
+        bg_css = f"""
+        background-image: url("data:image/png;base64,{b64}");
+        background-size: cover;
+        background-repeat: no-repeat;
+        background-attachment: fixed;
+        """
+
+    st.markdown(
+        f"""
+        <style>
+        .stApp {{
+            {bg_css}
+        }}
+        header[data-testid="stHeader"] {{ display: none; }}
+        [data-testid="stAppViewContainer"] > section:first-child {{
+            padding-top: 0px !important;
+            margin-top: 0px !important;
+        }}
+        .login-card {{
+            background: rgba(255,255,255,0.95);
+            padding: 20px;
+            border-radius: 10px;
+            max-width: 720px;
+            margin: 20px auto;
+            box-shadow: 0 6px 20px rgba(0,0,0,0.12);
+        }}
+        div.stButton > button {{
+            display: inline-block;
+            margin: 8px;
+            width: 180px;
+            height: 44px;
+            font-size: 15px;
+            border-radius: 8px;
+        }}
+        </style>
+        """,
+        unsafe_allow_html=True
+    )
+
+set_styles("can.jpg")
+
+# ---------------------------
+# DB CONNECTION
+# ---------------------------
 def get_connection():
-    # Make sure st.secrets has your SNOWFLAKE_* values
     return snowflake.connector.connect(
         user=st.secrets["SNOWFLAKE_USER"],
         password=st.secrets["SNOWFLAKE_PASSWORD"],
@@ -24,13 +79,14 @@ def get_connection():
         schema=st.secrets["SNOWFLAKE_SCHEMA"],
     )
 
-
+# ---------------------------
+# DB INITIALIZATION
+# ---------------------------
 def ensure_tables_and_columns():
     try:
         conn = get_connection()
         cur = conn.cursor()
 
-        # Create accounts table if missing (with loyalty_points)
         cur.execute("""
             CREATE TABLE IF NOT EXISTS accounts (
                 username VARCHAR PRIMARY KEY,
@@ -41,7 +97,6 @@ def ensure_tables_and_columns():
             )
         """)
 
-        # Create feedbacks table
         cur.execute("""
             CREATE TABLE IF NOT EXISTS feedbacks (
                 id INT AUTOINCREMENT PRIMARY KEY,
@@ -52,7 +107,6 @@ def ensure_tables_and_columns():
             )
         """)
 
-        # Create receipts table (minimal, will add columns if missing)
         cur.execute("""
             CREATE TABLE IF NOT EXISTS receipts (
                 id INT AUTOINCREMENT PRIMARY KEY,
@@ -68,59 +122,22 @@ def ensure_tables_and_columns():
             )
         """)
 
-        # Helper to check if a column exists (Snowflake information_schema)
-        def column_exists(table_name: str, column_name: str) -> bool:
-            try:
-                cur.execute(
-                    """
-                    SELECT COUNT(*) FROM information_schema.columns
-                    WHERE table_catalog = %s AND table_schema = %s AND table_name = %s AND column_name = %s
-                    """,
-                    (st.secrets["SNOWFLAKE_DATABASE"], st.secrets["SNOWFLAKE_SCHEMA"], table_name.upper(), column_name.upper())
-                )
-                cnt = cur.fetchone()[0]
-                return cnt > 0
-            except Exception:
-                # if we can't query information_schema, be conservative and return False
-                return False
-
-        # Ensure loyalty_points column present (for older DBs that had 'points' or none)
-        if not column_exists("accounts", "loyalty_points"):
-            try:
-                cur.execute("ALTER TABLE accounts ADD COLUMN loyalty_points INT DEFAULT 0")
-            except Exception:
-                # ignore if alter fails (e.g., privileges)
-                pass
-
-        # Ensure receipts columns (status, pickup_time) exist
-        if not column_exists("receipts", "status"):
-            try:
-                cur.execute("ALTER TABLE receipts ADD COLUMN status VARCHAR")
-                cur.execute("UPDATE receipts SET status='Pending' WHERE status IS NULL")
-            except Exception:
-                pass
-
-        if not column_exists("receipts", "pickup_time"):
-            try:
-                cur.execute("ALTER TABLE receipts ADD COLUMN pickup_time TIMESTAMP_NTZ")
-            except Exception:
-                pass
-
     finally:
         try:
             cur.close()
             conn.commit()
             conn.close()
-        except Exception:
+        except:
             pass
 
-# Run the ensure step (wrap so app still works without creds)
 try:
     ensure_tables_and_columns()
 except Exception as e:
-    st.warning(f"Could not ensure DB schema (continuing in limited/local mode): {e}")
+    st.warning(f"⚠️ Could not ensure DB schema: {e}")
 
-
+# ---------------------------
+# AUTH HELPERS
+# ---------------------------
 def hash_password(password: str, salt: bytes | None = None) -> str:
     if salt is None:
         salt = secrets.token_bytes(16)
@@ -133,295 +150,107 @@ def verify_password(stored: str, provided_password: str) -> bool:
         salt = bytes.fromhex(salt_hex)
         expected = hashlib.pbkdf2_hmac("sha256", provided_password.encode(), salt, 200_000)
         return expected.hex() == hash_hex
-    except Exception:
+    except:
         return False
-
 
 def save_account(username: str, password: str, role: str = "Non-Staff"):
     conn = get_connection()
     cur = conn.cursor()
     hashed = hash_password(password)
-    try:
-        cur.execute(
-            "INSERT INTO accounts (username, password, role) VALUES (%s, %s, %s)",
-            (username, hashed, role)
-        )
-        conn.commit()
-    finally:
-        cur.close()
-        conn.close()
+    cur.execute("INSERT INTO accounts (username, password, role) VALUES (%s, %s, %s)", (username, hashed, role))
+    conn.commit()
+    cur.close(); conn.close()
 
 def get_account(username: str):
     conn = get_connection()
     cur = conn.cursor()
-    try:
-        cur.execute("SELECT username, password, role, loyalty_points FROM accounts WHERE username=%s", (username,))
-        row = cur.fetchone()
-    finally:
-        cur.close()
-        conn.close()
+    cur.execute("SELECT username, password, role, loyalty_points FROM accounts WHERE username=%s", (username,))
+    row = cur.fetchone()
+    cur.close(); conn.close()
     if row:
         return {"username": row[0], "password": row[1], "role": row[2], "loyalty_points": int(row[3] or 0)}
     return None
 
 def validate_account(username: str, password: str):
     acc = get_account(username)
-    if not acc:
-        return None
-    if verify_password(acc["password"], password):
+    if acc and verify_password(acc["password"], password):
         return {"username": acc["username"], "role": acc["role"], "loyalty_points": acc["loyalty_points"]}
     return None
 
-def update_loyalty_points(username: str, delta: int):
-    conn = get_connection()
-    cur = conn.cursor()
-    try:
-        cur.execute("UPDATE accounts SET loyalty_points = COALESCE(loyalty_points,0) + %s WHERE username=%s", (int(delta), username))
-        conn.commit()
-        cur.execute("SELECT loyalty_points FROM accounts WHERE username=%s", (username,))
-        r = cur.fetchone()
-        return int(r[0] or 0) if r else None
-    finally:
-        cur.close()
-        conn.close()
-
-def save_feedback(item: str, feedback: str, rating: int, username: str = "Anon"):
-    conn = get_connection()
-    cur = conn.cursor()
-    try:
-        cur.execute("INSERT INTO feedbacks (item, feedback, rating) VALUES (%s, %s, %s)",
-                    (item, f"{username}: {feedback}", rating))
-        conn.commit()
-    finally:
-        cur.close()
-        conn.close()
-
-def load_feedbacks_df():
-    conn = get_connection()
-    cur = conn.cursor()
-    try:
-        cur.execute("SELECT item, feedback, rating, timestamp FROM feedbacks ORDER BY timestamp DESC")
-        rows = cur.fetchall()
-    finally:
-        cur.close()
-        conn.close()
-    if rows:
-        return pd.DataFrame(rows, columns=["item", "feedback", "rating", "timestamp"])
-    return pd.DataFrame(columns=["item", "feedback", "rating", "timestamp"])
-
-def save_receipt(order_id: str, items: str, total: float, payment_method: str, details: str = "", pickup_time: datetime = None, status: str = "Pending", user_id: str = None):
-    conn = get_connection()
-    cur = conn.cursor()
-    try:
-        cur.execute("""
-            INSERT INTO receipts (order_id, user_id, items, total, payment_method, details, pickup_time, status)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-        """, (order_id, user_id, items, float(total), payment_method, details, pickup_time, status))
-        conn.commit()
-    finally:
-        cur.close()
-        conn.close()
-
-def load_receipts_df():
-    conn = get_connection()
-    cur = conn.cursor()
-    try:
-        cur.execute("SELECT order_id, user_id, items, total, payment_method, details, pickup_time, status, timestamp FROM receipts ORDER BY timestamp DESC")
-        rows = cur.fetchall()
-    finally:
-        cur.close()
-        conn.close()
-    if rows:
-        return pd.DataFrame(rows, columns=["order_id","user_id","items","total","payment_method","details","pickup_time","status","timestamp"])
-    return pd.DataFrame(columns=["order_id","user_id","items","total","payment_method","details","pickup_time","status","timestamp"])
-
-def set_receipt_status(order_id: str, new_status: str):
-    conn = get_connection()
-    cur = conn.cursor()
-    try:
-        cur.execute("UPDATE receipts SET status=%s WHERE order_id=%s", (new_status, order_id))
-        conn.commit()
-    finally:
-        cur.close()
-        conn.close()
-    return True
-
-menu_data = {
-    "Breakfast": {"Tapsilog": 70, "Longsilog": 65, "Hotdog Meal": 50, "Omelette": 45},
-    "Lunch": {"Chicken Adobo": 90, "Pork Sinigang": 100, "Beef Caldereta": 120, "Rice": 15},
-    "Snack": {"Burger": 50, "Fries": 30, "Siomai Rice": 60, "Spaghetti": 45},
-    "Drinks": {"Soda": 20, "Iced Tea": 25, "Bottled Water": 15, "Coffee": 30},
-    "Dessert": {"Halo-Halo": 65, "Leche Flan": 40, "Ice Cream": 35},
-    "Dinner": {"Grilled Chicken": 95, "Sisig": 110, "Fried Bangus": 85, "Rice": 15},
-}
-if "sold_out" not in st.session_state:
-    st.session_state.sold_out = set()
-
-
-try:
-    client = Groq(api_key=st.secrets["GROQ_API_KEY"])
-except Exception:
-    client = None
-
-
+# ---------------------------
+# SESSION STATE INIT
+# ---------------------------
 if "page" not in st.session_state:
     st.session_state.page = "login"
 if "user" not in st.session_state:
     st.session_state.user = None
-if "cart" not in st.session_state:
-    st.session_state.cart = {}
-# session-level fallback loyalty_points (used only for guests/local)
-if "loyalty_points" not in st.session_state:
-    st.session_state.loyalty_points = 0
-if "notifications" not in st.session_state:
-    st.session_state.notifications = []
 
-st.markdown(
-    """
-    <style>
-    /* hide default Streamlit header */
-    header[data-testid="stHeader"] { display: none; }
-
-    /* tighten top spacing so no white box appears */
-    [data-testid="stAppViewContainer"] > section:first-child {
-        padding-top: 6px;
-    }
-
-    /* login card look */
-    .login-card {
-        background: rgba(255,255,255,0.95);
-        padding: 20px;
-        border-radius: 10px;
-        max-width: 720px;
-        margin: 12px auto;
-        box-shadow: 0 6px 20px rgba(0,0,0,0.12);
-    }
-
-    /* uniform button sizes */
-    div.stButton > button {
-        display: inline-block;
-        margin: 8px;
-        width: 180px;
-        height: 44px;
-        font-size: 15px;
-        border-radius: 8px;
-    }
-
-    /* Hide native clear/reveal buttons in inputs (Chrome/Edge/IE) */
-    input::-ms-clear, input::-ms-reveal { display: none; width: 0; height: 0; }
-    input::-webkit-search-cancel-button, input::-webkit-contacts-auto-fill-button, input::-webkit-clear-button { display: none; }
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
-
-
-def run_ai(question: str, extra_context: str = "") -> str:
-    if not client:
-        return "⚠️ AI unavailable (no Groq client configured)."
-    if not question:
-        return "Please ask a question."
-    menu_text = ", ".join([f"{item} ({price})" for cat in menu_data.values() for item, price in cat.items()])
-    context = f"MENU: {menu_text}\n{extra_context}"
-    prompt = f"You are an assistant for a canteen. Context: {context}\nUser question: {question}"
-    try:
-        resp = client.chat.completions.create(
-            model="llama-3.1-8b-instant",
-            messages=[{"role": "user", "content": prompt}],
-        )
-        return resp.choices[0].message.content
-    except Exception as e:
-        return f"⚠️ AI unavailable: {e}"
-
-
-def password_valid_rules(pw: str):
-    rules = {
-        "length": len(pw) >= 12,
-        "upper": bool(re.search(r"[A-Z]", pw)),
-        "lower": bool(re.search(r"[a-z]", pw)),
-        "digit": bool(re.search(r"[0-9]", pw)),
-        # symbol: any non-word, non-space char
-        "symbol": bool(re.search(r"[^\w\s]", pw)),
-    }
-    return rules
-
-
+# ---------------------------
+# LOGIN PAGE
+# ---------------------------
 if st.session_state.page == "login":
     st.markdown('<div class="login-card">', unsafe_allow_html=True)
     st.markdown("<h2>☕ BiteHub — Login</h2>", unsafe_allow_html=True)
 
-    username = st.text_input("Username", placeholder="Enter username", key="login_username")
-    password = st.text_input("Password", type="password", placeholder="Enter password", key="login_password")
+    username = st.text_input("Username", placeholder="Enter username")
+    password = st.text_input("Password", type="password", placeholder="Enter password")
 
-    st.markdown('<div class="center-buttons">', unsafe_allow_html=True)
     col1, col2, col3 = st.columns([1,1,1])
     with col1:
-        if st.button("Log In", key="login_btn"):
-            user = None
-            try:
-                user = validate_account(username, password)
-            except Exception as e:
-                st.error(f"Login error (DB): {e}")
-                user = None
+        if st.button("Log In"):
+            user = validate_account(username, password)
             if user:
-                # user contains loyalty_points
                 st.session_state.user = user
                 st.session_state.page = "main"
                 st.success(f"Welcome, {user['username']}!")
+                st.rerun()
             else:
-                st.error("❌ Invalid username or password. Please try again or create an account.")
+                st.error("Invalid username or password.")
+
     with col2:
-        if st.button("Guest Account", key="guest_btn"):
-            # Guest session: no DB account, limited features
+        if st.button("Guest Account"):
             st.session_state.user = {"username": "Guest", "role": "Non-Staff", "loyalty_points": 0}
             st.session_state.page = "main"
             st.success("Signed in as Guest")
-    with col3:
-        if st.button("Create Account", key="goto_signup"):
-            st.session_state.page = "signup"
-    st.markdown("</div>", unsafe_allow_html=True)
-    st.markdown("</div>", unsafe_allow_html=True)
+            st.rerun()
 
+    with col3:
+        if st.button("Create Account"):
+            st.session_state.page = "signup"
+            st.rerun()
+
+    st.markdown('</div>', unsafe_allow_html=True)
+
+# ---------------------------
+# SIGNUP PAGE
+# ---------------------------
 elif st.session_state.page == "signup":
     st.markdown('<div class="login-card">', unsafe_allow_html=True)
     st.markdown("<h2>✍️ Create Account</h2>", unsafe_allow_html=True)
 
-    new_username = st.text_input("New Username", key="signup_username")
-    new_pass = st.text_input("New Password", type="password", key="signup_password")
-    new_role = st.selectbox("Role", ["Non-Staff", "Staff"], key="signup_role")
+    new_username = st.text_input("New Username")
+    new_pass = st.text_input("New Password", type="password")
+    new_role = st.selectbox("Role", ["Non-Staff", "Staff"])
 
-    # live validation display
-    rules = password_valid_rules(new_pass)
-    st.markdown("**Password rules:** (all must be ✅ to register)")
-    st.write(f"- Minimum 12 chars: {'✅' if rules['length'] else '❌'}")
-    st.write(f"- Uppercase letter: {'✅' if rules['upper'] else '❌'}")
-    st.write(f"- Lowercase letter: {'✅' if rules['lower'] else '❌'}")
-    st.write(f"- Number: {'✅' if rules['digit'] else '❌'}")
-    st.write(f"- Symbol: {'✅' if rules['symbol'] else '❌'}")
-
-    if st.button("Register", key="register_btn"):
-        if not new_username or not new_pass:
-            st.error("Please fill all fields.")
-        elif not all(rules.values()):
-            st.error("Password does not meet requirements.")
+    if st.button("Register"):
+        if get_account(new_username):
+            st.error("Username already exists.")
         else:
-            try:
-                if get_account(new_username):
-                    st.error("Username already exists.")
-                else:
-                    save_account(new_username, new_pass, new_role)
-                    st.success(f"✅ Account created for {new_username}. Please log in.")
-                    st.session_state.page = "login"
-            except Exception as e:
-                st.error(f"Could not create account: {e}")
+            save_account(new_username, new_pass, new_role)
+            st.success(f"✅ Account created for {new_username}. Please log in.")
+            st.session_state.page = "login"
+            st.rerun()
 
-    if st.button("Back to Login", key="back_login"):
+    if st.button("Back to Login"):
         st.session_state.page = "login"
-    st.markdown("</div>", unsafe_allow_html=True)
+        st.rerun()
+
+    st.markdown('</div>', unsafe_allow_html=True)
 
 # ---------------------------
-# MAIN Portal (Non-Staff and Staff)
+# MAIN PORTAL
 # ---------------------------
+
 elif st.session_state.page == "main":
     user = st.session_state.user or {"username": "Guest", "role": "Non-Staff", "loyalty_points": 0}
     # normalize structure: ensure 'loyalty_points' exists
@@ -705,5 +534,6 @@ elif st.session_state.page == "main":
         if st.button("Log Out", key="logout_staff"):
             st.session_state.page = "login"
             st.session_state.user = None
+
 
 

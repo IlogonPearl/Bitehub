@@ -14,57 +14,20 @@ import re
 # ---------------------------
 # PAGE CONFIG
 # ---------------------------
-st.set_page_config(page_title="BiteHub Canteen GenAI", layout="wide")
+page_bg_img = f"""
+<style>
 
-# ---------------------------
-# STYLES & BACKGROUND
-# ---------------------------
-def set_styles(background_image: str = None):
-    """Apply global CSS styles and optional background image."""
-    bg_css = ""
-    if background_image:
-        with open(background_image, "rb") as f:
-            b64 = base64.b64encode(f.read()).decode()
-        bg_css = f"""
-        background-image: url("data:image/png;base64,{b64}");
+.st-emotion-cache-1yiq2ps{{
+
+        background-image: url("can.jpg");
         background-size: cover;
         background-repeat: no-repeat;
         background-attachment: fixed;
-        """
-
-    st.markdown(
-        f"""
-        <style>
-        .stApp {{
-            {bg_css}
-        }}
-        header[data-testid="stHeader"] {{ display: none; }}
-        [data-testid="stAppViewContainer"] > section:first-child {{
-            padding-top: 0px !important;
-            margin-top: 0px !important;
-        }}
-        .login-card {{
-            background: rgba(255,255,255,0.95);
-            padding: 20px;
-            border-radius: 10px;
-            max-width: 720px;
-            margin: 20px auto;
-            box-shadow: 0 6px 20px rgba(0,0,0,0.12);
-        }}
-        div.stButton > button {{
-            display: inline-block;
-            margin: 8px;
-            width: 180px;
-            height: 44px;
-            font-size: 15px;
-            border-radius: 8px;
-        }}
-        </style>
-        """,
-        unsafe_allow_html=True
-    )
-
-set_styles("can.jpg")
+    
+}}
+</style>
+"""
+    st.markdown(page_bg_img, unsafe_allow_html=True)
 
 # ---------------------------
 # DB CONNECTION
@@ -536,6 +499,7 @@ elif st.session_state.page == "main":
         if st.button("Log Out", key="logout_staff"):
             st.session_state.page = "login"
             st.session_state.user = None
+
 
 
 

@@ -12,22 +12,44 @@ import secrets
 import re
 
 # ---------------------------
-# PAGE CONFIG
+# PAGE CONFIG & BACKGROUND
 # ---------------------------
-page_bg_img = f"""
-<style>
+st.set_page_config(page_title="BiteHub", layout="wide")
 
-.st-emotion-cache-1yiq2ps{{
+def set_background(image_file: str):
+    with open(image_file, "rb") as f:
+        encoded = base64.b64encode(f.read()).decode()
+    ext = image_file.split(".")[-1].lower()
+    mime = "jpeg" if ext in ["jpg", "jpeg"] else "png"
 
-        background-image: url("can.jpg");
-        background-size: cover;
-        background-repeat: no-repeat;
-        background-attachment: fixed;
-    
-}}
-</style>
-"""
-    st.markdown(page_bg_img, unsafe_allow_html=True)
+    st.markdown(
+        f"""
+        <style>
+        [data-testid="stAppViewContainer"] {{
+            background: url("data:image/{mime};base64,{encoded}");
+            background-size: cover;
+            background-position: center;
+            background-repeat: no-repeat;
+        }}
+        [data-testid="stHeader"] {{
+            background: rgba(0,0,0,0,0);
+        }}
+        [data-testid="stSidebar"] {{
+            background: rgba(255,255,255,0.85);
+        }}
+        .login-card {{
+            background: rgba(0,0,0,0.65);
+            padding: 2rem;
+            border-radius: 1rem;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+        }}
+        </style>
+        """,
+        unsafe_allow_html=True
+    )
+
+# call this once at startup
+set_background("can.jpg")   # 👈 make sure can.jpg is in same folder as app.py
 
 # ---------------------------
 # DB CONNECTION
@@ -159,28 +181,26 @@ if st.session_state.page == "login":
     password = st.text_input("Password", type="password", placeholder="Enter password")
 
     col1, col2, col3 = st.columns([1,1,1])
-    with col1:
-        if st.button("Log In"):
-            user = validate_account(username, password)
-            if user:
-                st.session_state.user = user
-                st.session_state.page = "main"
-                st.success(f"Welcome, {user['username']}!")
-                st.rerun()
-            else:
-                st.error("Invalid username or password.")
-
-    with col2:
-        if st.button("Guest Account"):
-            st.session_state.user = {"username": "Guest", "role": "Non-Staff", "loyalty_points": 0}
+   with col1:
+    if st.button("Log In"):
+        user = validate_account(username, password)
+        if user:
+            st.session_state.user = user
             st.session_state.page = "main"
-            st.success("Signed in as Guest")
-            st.rerun()
+            st.rerun()   # 👈 direct rerun, no st.success()
+        else:
+            st.error("Invalid username or password.")
 
-    with col3:
-        if st.button("Create Account"):
-            st.session_state.page = "signup"
-            st.rerun()
+with col2:
+    if st.button("Guest Account"):
+        st.session_state.user = {"username": "Guest", "role": "Non-Staff", "loyalty_points": 0}
+        st.session_state.page = "main"
+        st.rerun()
+
+with col3:
+    if st.button("Create Account"):
+        st.session_state.page = "signup"
+        st.rerun()
 
     st.markdown('</div>', unsafe_allow_html=True)
 
@@ -195,14 +215,15 @@ elif st.session_state.page == "signup":
     new_pass = st.text_input("New Password", type="password")
     new_role = st.selectbox("Role", ["Non-Staff", "Staff"])
 
-    if st.button("Register"):
-        if get_account(new_username):
-            st.error("Username already exists.")
-        else:
-            save_account(new_username, new_pass, new_role)
-            st.success(f"✅ Account created for {new_username}. Please log in.")
-            st.session_state.page = "login"
-            st.rerun()
+   if st.button("Register"):
+    if get_account(new_username):
+        st.error("Username already exists.")
+    else:
+        save_account(new_username, new_pass, new_role)
+        st.session_state.page = "main"
+        st.session_state.user = {"username": new_username, "role": new_role, "loyalty_points": 0}
+        st.rerun()
+
 
     if st.button("Back to Login"):
         st.session_state.page = "login"
@@ -499,6 +520,7 @@ elif st.session_state.page == "main":
         if st.button("Log Out", key="logout_staff"):
             st.session_state.page = "login"
             st.session_state.user = None
+
 
 
 

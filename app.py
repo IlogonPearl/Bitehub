@@ -181,6 +181,7 @@ if st.session_state.page == "login":
     password = st.text_input("Password", type="password", placeholder="Enter password")
 
     col1, col2, col3 = st.columns([1,1,1])
+
     with col1:
         if st.button("Log In"):
             user = validate_account(username, password)
@@ -193,7 +194,11 @@ if st.session_state.page == "login":
 
     with col2:
         if st.button("Guest Account"):
-            st.session_state.user = {"username": "Guest", "role": "Non-Staff", "loyalty_points": 0}
+            st.session_state.user = {
+                "username": "Guest",
+                "role": "Non-Staff",
+                "loyalty_points": 0
+            }
             st.session_state.page = "main"
             st.rerun()
 
@@ -202,8 +207,6 @@ if st.session_state.page == "login":
             st.session_state.page = "signup"
             st.rerun()
 
-
-# ---------------------------
 # SIGNUP PAGE
 # ---------------------------
 elif st.session_state.page == "signup":
@@ -519,6 +522,7 @@ elif st.session_state.page == "main":
         if st.button("Log Out", key="logout_staff"):
             st.session_state.page = "login"
             st.session_state.user = None
+
 
 
 
